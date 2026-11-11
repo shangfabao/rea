@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  workflows: write
   contents: write
 
 concurrency:
