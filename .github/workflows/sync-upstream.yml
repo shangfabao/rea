@@ -54,7 +54,7 @@ jobs:
 
       - name: Push
         if: steps.check.outputs.changed == 'true'
-        run: git push origin main
+        run: git push origin HEAD:"$UPSTREAM_BRANCH"
 
       - name: Sync tags
         if: steps.check.outputs.changed == 'true'
