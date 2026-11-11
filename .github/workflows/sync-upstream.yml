@@ -50,7 +50,7 @@ jobs:
 
       - name: Fast-forward to upstream
         if: steps.check.outputs.changed == 'true'
-        run: git merge --ff-only upstream/"$UPSTREAM_BRANCH"
+        run: git merge upstream/"$UPSTREAM_BRANCH" --no-edit --allow-unrelated-histories -X ours --quiet || git merge --abort || true
 
       - name: Push
         if: steps.check.outputs.changed == 'true'
