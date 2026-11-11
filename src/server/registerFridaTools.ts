@@ -1,18 +1,20 @@
+import type { FridaCapturePolicy } from "../domain/fridaCapturePolicy.js";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { Logger } from "pino";
 
 import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
+import type { EvidenceLookup } from "../application/EvidenceInputResolver.js";
 import { FridaInstrumentationService } from "../application/frida/FridaInstrumentationService.js";
-import type { FridaInstrumentationPort } from "../application/frida/FridaInstrumentationPort.js";
-import type { FridaRemoteConnection } from "../application/frida/FridaInstrumentationPort.js";
+import type {
+  FridaInstrumentationPort,
+  FridaRemoteConnection,
+} from "../application/frida/FridaInstrumentationPort.js";
 import { toolContract } from "../contracts/toolContracts.js";
-import { evidenceSchema } from "../domain/evidence.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { logToolExecution } from "./toolLogging.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
-import type { ToolResultDelivery } from "./toolResult.js";
-import { unknownFridaSession } from "../application/frida/fridaInputErrors.js";
+import type { ToolResultDelivery } from "./ToolResultDelivery.js";
 
 /** Register Frida device discovery and persistent instrumentation operations. */
 export const registerFridaTools = (
@@ -21,6 +23,7 @@ export const registerFridaTools = (
   logger: Logger,
   delivery: ToolResultDelivery,
   recordEvidence?: EvidenceWriter["recordEvidence"],
+  evidenceById?: EvidenceLookup,
 ): void => {
   const service = new FridaInstrumentationService(provider);
   const listDevices = toolContract("list_frida_devices");
@@ -40,22 +43,7 @@ export const registerFridaTools = (
       const result = await logToolExecution(logger, listDevices.name, () =>
         service.listDevices(remoteConnection(input.remote)),
       );
-      return result.ok
-        ? delivery.toCallToolResult(
-            {
-              ok: true,
-              value: jsonValueSchema.parse({
-                devices: result.value.devices.map((device) => ({
-                  device_id: device.deviceId,
-                  name: device.name,
-                  type: device.type,
-                })),
-                cleanup_error: result.value.cleanupError,
-              }),
-            },
-            listDevices,
-          )
-        : delivery.toCallToolResult(result, listDevices);
+      return delivery.toCallToolResult(result, listDevices);
     },
   );
   server.registerTool(
@@ -71,19 +59,7 @@ export const registerFridaTools = (
           ...(remote === undefined ? {} : { remote }),
         }),
       );
-      return result.ok
-        ? delivery.toCallToolResult(
-            {
-              ok: true,
-              value: jsonValueSchema.parse({
-                device_id: result.value.deviceId,
-                processes: result.value.processes,
-                cleanup_error: result.value.cleanupError,
-              }),
-            },
-            listProcesses,
-          )
-        : delivery.toCallToolResult(result, listProcesses);
+      return delivery.toCallToolResult(result, listProcesses);
     },
   );
   server.registerTool(
@@ -92,6 +68,9 @@ export const registerFridaTools = (
     async (input, context: ServerContext) => {
       const remote = remoteConnection(input.remote);
       const selected = {
+        ...(input.capture_limits === undefined
+          ? {}
+          : { captureLimits: input.capture_limits }),
         ...(input.device_id === undefined ? {} : { deviceId: input.device_id }),
         ...(remote === undefined ? {} : { remote }),
       };
@@ -120,10 +99,12 @@ export const registerFridaTools = (
                 error: new AnalysisInputError(start.name),
               }),
       );
-      if (!result.ok) {
-        recordPartialEvidence(result.error, recordEvidence);
-        return delivery.toCallToolResult(result, start);
-      }
+      if (!result.ok)
+        return delivery.toPartialErrorToolResult(
+          result.error,
+          start.returnsTargetContent,
+          recordEvidence,
+        );
       return delivery.toCallToolResult(
         {
           ok: true,
@@ -161,10 +142,12 @@ export const registerFridaTools = (
                 error: new AnalysisInputError(load.name),
               }),
       );
-      if (!result.ok) {
-        recordPartialEvidence(result.error, recordEvidence);
-        return delivery.toCallToolResult(result, load);
-      }
+      if (!result.ok)
+        return delivery.toPartialErrorToolResult(
+          result.error,
+          load.returnsTargetContent,
+          recordEvidence,
+        );
       return delivery.toEvidenceToolResult(
         result.value,
         load,
@@ -210,19 +193,15 @@ export const registerFridaTools = (
     status.name,
     toolRegistrationOptions(status),
     async (input) => {
-      const evidence = service.statusEvidence(input.session_id);
-      if (evidence === undefined)
-        return delivery.toCallToolResult(
-          {
-            ok: false as const,
-            error: unknownFridaSession(status.name, input.session_id),
-          },
-          status,
-        );
+      const result = service.inspectStatus(input, {
+        recordEvidence,
+        evidenceById,
+      });
+      if (!result.ok) return delivery.toCallToolResult(result, status);
       return delivery.toEvidenceToolResult(
-        evidence,
+        result.value,
         status,
-        recordEvidence?.(evidence),
+        recordEvidence?.(result.value),
       );
     },
   );
@@ -247,6 +226,9 @@ export const registerFridaTools = (
     async (input, context: ServerContext) => {
       const remote = remoteConnection(input.remote);
       const selected = {
+        ...(input.capture_limits === undefined
+          ? {}
+          : { captureLimits: input.capture_limits }),
         ...(input.device_id === undefined ? {} : { deviceId: input.device_id }),
         ...(remote === undefined ? {} : { remote }),
       };
@@ -294,10 +276,12 @@ export const registerFridaTools = (
         instrument.name,
         () => operation,
       );
-      if (!result.ok) {
-        recordPartialEvidence(result.error, recordEvidence);
-        return delivery.toCallToolResult(result, instrument);
-      }
+      if (!result.ok)
+        return delivery.toPartialErrorToolResult(
+          result.error,
+          instrument.returnsTargetContent,
+          recordEvidence,
+        );
       return delivery.toEvidenceToolResult(
         result.value.evidence,
         instrument,
@@ -305,15 +289,6 @@ export const registerFridaTools = (
       );
     },
   );
-};
-
-const recordPartialEvidence = (
-  error: { readonly partialObservation?: unknown },
-  recordEvidence: EvidenceWriter["recordEvidence"] | undefined,
-): void => {
-  if (error.partialObservation === undefined) return;
-  const parsed = evidenceSchema.safeParse(error.partialObservation);
-  if (parsed.success) recordEvidence?.(parsed.data);
 };
 
 const remoteConnection = (
@@ -342,6 +317,7 @@ const remoteConnection = (
       };
 
 const sessionOutput = (session: {
+  readonly captureLimits?: FridaCapturePolicy;
   readonly sessionId: string;
   readonly deviceId: string;
   readonly target: string;
@@ -350,6 +326,9 @@ const sessionOutput = (session: {
   readonly state: "paused" | "running" | "detached";
 }) => ({
   session_id: session.sessionId,
+  ...(session.captureLimits === undefined
+    ? {}
+    : { capture_limits: session.captureLimits }),
   device_id: session.deviceId,
   target: session.target,
   pid: session.pid,

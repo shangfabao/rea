@@ -99,6 +99,12 @@ export const cleanupHopperSession = async (
   )
     input.releaseTransport(input.socket);
   await stopProcess(input, state);
+  // A late authenticated application may exit while shutdown is in flight.
+  await confirmExternalApplicationExit(
+    input.resources,
+    input.socket,
+    input.releaseTransport,
+  );
   recordUnconfirmedDocument(input, state);
   await report(input.progress, 0.75, "removing Hopper private runtime files");
   if (
@@ -379,15 +385,33 @@ const cleanupOutcome = (
 ): Result<null, AnalysisError> => {
   if (state.issues.length === 0) return ok(null);
   return err(
-    new ProviderCleanupError("hopper", [...state.resources], {
-      issues: cleanupIssueDetails(state.issues),
-      ...(input.resources.runtimeRoot === undefined
-        ? {}
-        : { runtime_root: input.resources.runtimeRoot.path }),
-      ...(input.activeRequest === null
-        ? {}
-        : { active_request: activityDetails(input.activeRequest) }),
-    }),
+    new ProviderCleanupError(
+      "hopper",
+      [...state.resources],
+      {
+        issues: cleanupIssueDetails(state.issues),
+        ...(input.resources.runtimeRoot === undefined
+          ? {}
+          : { runtime_root: input.resources.runtimeRoot.path }),
+        ...(input.activeRequest === null
+          ? {}
+          : { active_request: activityDetails(input.activeRequest) }),
+        ...(state.resources.has("hopper-document")
+          ? {
+              authenticated_application:
+                input.resources.externalApplication === undefined
+                  ? "not_observed"
+                  : input.resources.externalApplication.identity.state,
+            }
+          : {}),
+      },
+      state.resources.has("hopper-document")
+        ? {
+            remediationAction:
+              "Export the Evidence bundle before close_binary clears session records. Let Hopper finish initial analysis or complete its pending dialog, then retry close_binary on this connection so REA can authenticate and close the retained document. If no matching bridge becomes available, manually close the reported document in Hopper, then restart the MCP connection. A helper exit or open:false does not establish that retained cleanup is complete.",
+          }
+        : undefined,
+    ),
   );
 };
 
@@ -411,12 +435,14 @@ const report = async (
   message: string,
 ): Promise<void> => {
   // best-effort cleanup: progress reporting must not fail session cleanup.
-  await progress
-    ?.report({
+  try {
+    await progress?.report({
       phase: "hopper_cleanup",
       completed,
       total: 1,
       message,
-    })
-    .catch(() => undefined);
+    });
+  } catch {
+    // Observer failures cannot prevent release of the session's owned resources.
+  }
 };

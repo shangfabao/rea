@@ -5,6 +5,51 @@ import { expect } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
+import { buildGamecubeDol } from "../../../src/domain/gamecubeDol.fixture.js";
+
+cliTest(
+  "validates GameCube format and architecture selections",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-dol-cli-");
+    const path = join(root, "image.dol");
+    await writeFile(path, buildGamecubeDol());
+    const result = await cli.run({
+      arguments: [
+        "inspect",
+        path,
+        "--target-format",
+        "gamecube-dol",
+        "--architecture",
+        "arm64",
+        "--json",
+      ],
+      environment: { HOME: root, XDG_CONFIG_HOME: root, XDG_CACHE_HOME: root },
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.json).toMatchObject({
+      code: "invalid_request",
+      details: {
+        reason: expect.stringMatching(
+          /gamecube-dol.*architecture.*DOL header/iu,
+        ),
+      },
+    });
+    const invalid = await cli.run({
+      arguments: ["inspect", path, "--target-format", "gamecube", "--json"],
+      environment: { HOME: root, XDG_CONFIG_HOME: root, XDG_CACHE_HOME: root },
+    });
+    expect(invalid.exitCode).not.toBe(0);
+    expect(invalid.json).toMatchObject({
+      code: "VALIDATION_ERROR",
+      fieldErrors: expect.arrayContaining([
+        expect.objectContaining({
+          code: "invalid_value",
+          path: "target-format",
+        }),
+      ]),
+    });
+  },
+);
 
 cliTest(
   "rejects a headerless image until architecture and entry are supplied",
@@ -68,12 +113,15 @@ cliTest(
   },
 );
 
-cliTest(
-  "rejects an unaligned AArch64 entry before provider startup",
-  async ({ cli }) => {
+cliTest.for([
+  ["arm64", "c0035fd6", "0x8000001", "must be 4-byte aligned"],
+  ["m68k", "4e75", "0x1001", "must be 2-byte aligned"],
+] as const)(
+  "rejects an unaligned %s entry before provider startup",
+  async ([architecture, bytes, entryPoint, reason], { cli }) => {
     const root = await createTestTempDirectory("rea-raw-cli-alignment-");
     const path = join(root, "image.bin");
-    await writeFile(path, Buffer.from("c0035fd6", "hex"));
+    await writeFile(path, Buffer.from(bytes, "hex"));
     const result = await cli.run({
       arguments: [
         "inspect",
@@ -81,9 +129,9 @@ cliTest(
         "--target-format",
         "raw-binary",
         "--architecture",
-        "arm64",
+        architecture,
         "--entry-point",
-        "0x8000001",
+        entryPoint,
         "--provider",
         "ghidra",
         "--json",
@@ -93,7 +141,7 @@ cliTest(
     expect(result.exitCode).toBe(1);
     expect(result.json).toMatchObject({
       code: "invalid_request",
-      details: { reason: expect.stringContaining("must be 4-byte aligned") },
+      details: { reason: expect.stringContaining(reason) },
     });
   },
 );

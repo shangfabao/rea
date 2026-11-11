@@ -5,6 +5,10 @@ import { isCallToolResult } from "@modelcontextprotocol/server";
 import { expect, it } from "vitest";
 import { z } from "zod";
 
+import { BROWSER_TOOL_CONTRACTS } from "../../../src/contracts/browserToolContracts.js";
+import { BROWSER_SCENARIO_TOOL_CONTRACTS } from "../../../src/contracts/browserScenarioToolContracts.js";
+import { ELECTRON_TOOL_CONTRACTS } from "../../../src/contracts/javascript/electronToolContracts.js";
+import { JAVASCRIPT_RUNTIME_OBSERVATION_TOOL_CONTRACTS } from "../../../src/contracts/javascript/javascriptRuntimeObservationToolContracts.js";
 import { GENERATED_MCP_TOOL_CATALOG } from "../../fixtures/mcpToolCatalog.js";
 import { parseMcpToolError } from "../../fixtures/mcpToolError.js";
 
@@ -25,8 +29,13 @@ const resultSchema = z.object({
   ),
 });
 
-it("preserves advertised schemas and handler meaning when presentation order changes", async () => {
+it("preserves full advertised schemas and handler meaning when presentation order changes", async () => {
   const { stdout } = await execute(process.execPath, [fixture, "reversed"], {
+    env: {
+      ...process.env,
+      REA_MCP_INPUT_SCHEMA_PROFILE: "full",
+      REA_MCP_OUTPUT_SCHEMA_PROFILE: "full",
+    },
     timeout: 20_000,
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -42,6 +51,18 @@ it("preserves advertised schemas and handler meaning when presentation order cha
     expect(advertised.inputSchema).toEqual(canonical?.inputSchema);
     expect(advertised.outputSchema).toEqual(canonical?.outputSchema);
   }
+  expect(result.responses.map(({ name }) => name).sort()).toEqual(
+    [
+      ...BROWSER_TOOL_CONTRACTS,
+      ...BROWSER_SCENARIO_TOOL_CONTRACTS,
+      ...ELECTRON_TOOL_CONTRACTS.filter(
+        ({ name }) => name !== "analyze_javascript_application",
+      ),
+      ...JAVASCRIPT_RUNTIME_OBSERVATION_TOOL_CONTRACTS,
+    ]
+      .map(({ name }) => name)
+      .sort(),
+  );
   for (const { name, response } of result.responses) {
     if (!isCallToolResult(response))
       throw new Error(`Invalid tools/call fixture result for ${name}`);

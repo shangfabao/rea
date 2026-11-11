@@ -25,25 +25,17 @@ ARGUMENT_REGISTERS = {
     "x86_64": ["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
     "x86_64h": ["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
 }
-MAX_SELECTOR_BYTES = 1024
-MAX_REPORTED_LOCATIONS = 64
-MAX_OTHER_STOPS = 256
-MAX_TRACE_BYTES = 8 * 1024 * 1024
-MAX_TRACE_FRAMES = 65_536
-MAX_OBSERVATION_JOURNAL_BYTES = MAX_TRACE_BYTES
-MAX_BREAKPOINT_LOCATION_BYTES = 8 * 1024 * 1024
-MAX_TARGET_OUTPUT_BYTES = 1024 * 1024
 OUTPUT_DRAIN_BYTES_PER_PASS = 1024 * 1024
 OUTPUT_EOF_WAIT_SECONDS = 1.0
 OUTPUT_READER_JOIN_SECONDS = 0.5
 LISTENER_NAME = "rea-native-call-observation"
 
 
-def _can_retain_trace(current_bytes, current_frames, event_bytes, event_frames):
+def _can_retain_trace(current_bytes, current_frames, event_bytes, event_frames, limits):
     """Whether a complete event fits both aggregate trace budgets."""
     return (
-        current_bytes + event_bytes <= MAX_TRACE_BYTES
-        and current_frames + event_frames <= MAX_TRACE_FRAMES
+        current_bytes + event_bytes <= limits["trace_bytes"]
+        and current_frames + event_frames <= limits["trace_frames"]
     )
 
 
@@ -72,7 +64,7 @@ def _fits_trace_budget(value, remaining_bytes):
 class _ObservationJournal:
     """Flush a bounded JSONL prefix so observations survive tracer failure."""
 
-    def __init__(self, handle, max_bytes=MAX_OBSERVATION_JOURNAL_BYTES):
+    def __init__(self, handle, max_bytes):
         self.handle = handle
         self.max_bytes = max_bytes
         self.bytes = 0
@@ -244,6 +236,20 @@ def _hex(value):
     return "0x%x" % value
 
 
+def _source_location(address):
+    """Preserve available line-entry facets without acquiring source files."""
+    entry = address.GetLineEntry()
+    if not entry.IsValid():
+        return None
+    file_spec = entry.GetFileSpec()
+    file_path = str(file_spec) if file_spec.IsValid() else None
+    line = entry.GetLine() or None
+    column = entry.GetColumn() or None
+    if not file_path and line is None and column is None:
+        return None
+    return {"file_path": file_path or None, "line": line, "column": column}
+
+
 def _location(address, target):
     """Load and file address, module and symbol of one code address."""
     module = address.GetModule()
@@ -257,6 +263,7 @@ def _location(address, target):
         "module": module.GetFileSpec().GetFilename() if module.IsValid() else None,
         "module_path": str(module.GetFileSpec()) if module.IsValid() else None,
         "symbol": symbol.GetName() if symbol.IsValid() else None,
+        "source_location": _source_location(address),
     }
     return location
 
@@ -357,7 +364,7 @@ def _record(context, thread, frame, index, sequence, location, remaining_bytes):
         error = lldb.SBError()
         text = process.ReadCStringFromMemory(
             values[names[1]],
-            MAX_SELECTOR_BYTES,
+            config["capture_limits"]["selector_bytes"],
             error,
         )
         selector = text if error.Success() and text else None
@@ -390,10 +397,16 @@ def _record(context, thread, frame, index, sequence, location, remaining_bytes):
 _TRACE_CONTEXT = None
 
 
+def _resource_limit(context, limit):
+    context["resource_limit"] = limit
+    return "resource-limit"
+
+
 def _handle_breakpoint(context, frame, index):
     """Read one hit while LLDB's breakpoint callback owns the stopped frame."""
     if not frame.IsValid() or frame.GetPC() == lldb.LLDB_INVALID_ADDRESS:
         raise RuntimeError("LLDB breakpoint callback did not supply a readable frame")
+    limits = context["config"]["capture_limits"]
     thread = frame.GetThread()
     events = context["events"]
     location = _location(frame.GetPCAddress(), context["target"])
@@ -410,49 +423,50 @@ def _handle_breakpoint(context, frame, index):
         context["retained_frames"],
         0,
         event_frame_count,
+        limits,
     ):
-        return "resource-limit"
+        return _resource_limit(context, "trace_frames")
     try:
-        remaining_bytes = MAX_TRACE_BYTES - context["retained_trace_bytes"]
+        remaining_bytes = limits["trace_bytes"] - context["retained_trace_bytes"]
         record = _record(
             context, thread, frame, index, len(events), location, remaining_bytes
         )
     except ValueError:
-        return "resource-limit"
+        return _resource_limit(context, "trace_bytes")
     if record is not None:
         if not _fits_trace_budget(record, remaining_bytes):
-            return "resource-limit"
+            return _resource_limit(context, "trace_bytes")
         record_bytes = len(json.dumps(record).encode("utf-8"))
-        if context["retained_trace_bytes"] + record_bytes > MAX_TRACE_BYTES:
-            return "resource-limit"
+        if context["retained_trace_bytes"] + record_bytes > limits["trace_bytes"]:
+            return _resource_limit(context, "trace_bytes")
         for depth in range(1, frame_count + 1):
             try:
                 location = _location(
                     thread.GetFrameAtIndex(depth).GetPCAddress(), context["target"]
                 )
             except ValueError:
-                return "resource-limit"
+                return _resource_limit(context, "trace_bytes")
             if (
                 _estimated_json_size(location) + record_bytes + 1
-                > MAX_TRACE_BYTES - context["retained_trace_bytes"]
+                > limits["trace_bytes"] - context["retained_trace_bytes"]
             ):
-                return "resource-limit"
+                return _resource_limit(context, "trace_bytes")
             location_bytes = len(json.dumps(location).encode("utf-8"))
             addition = location_bytes + (1 if record["backtrace"] else 0)
             if (
                 context["retained_trace_bytes"]
                 + record_bytes
                 + addition
-                > MAX_TRACE_BYTES
+                > limits["trace_bytes"]
             ):
-                return "resource-limit"
+                return _resource_limit(context, "trace_bytes")
             record["backtrace"].append(location)
             record_bytes += addition
         journal = context.get("observation_journal")
         if journal is not None and not journal.append(
             {"kind": "event", "event": record}
         ):
-            return "resource-limit"
+            return _resource_limit(context, "trace_bytes")
         events.append(record)
         context["retained_frames"] += event_frame_count
         context["retained_trace_bytes"] += record_bytes
@@ -484,9 +498,9 @@ def _handle_stop(context, other_stops):
             if journal is not None and not journal.append(
                 {"kind": "other-stop", "reason": stop_description}
             ):
-                return "resource-limit"
+                return _resource_limit(context, "trace_bytes")
             other_stops.append(stop_description)
-            if len(other_stops) >= MAX_OTHER_STOPS:
+            if len(other_stops) >= context["config"]["capture_limits"]["other_stops"]:
                 return "stop-limit"
     return None
 
@@ -505,20 +519,19 @@ def _breakpoint_report(target, created, config):
                 if not _wanted(config["breakpoints"][index], location["symbol"] or ""):
                     continue
                 count += 1
-                if len(locations) < MAX_REPORTED_LOCATIONS:
-                    remaining_bytes = (
-                        MAX_BREAKPOINT_LOCATION_BYTES - retained_location_bytes
-                    )
-                    if not _fits_trace_budget(location, remaining_bytes):
-                        locations_truncated = True
-                        continue
-                    location_bytes = len(json.dumps(location).encode("utf-8"))
-                    addition = location_bytes + (1 if locations else 0)
-                    if addition > remaining_bytes:
-                        locations_truncated = True
-                        continue
-                    locations.append(location)
-                    retained_location_bytes += addition
+                remaining_bytes = (
+                    config["capture_limits"]["breakpoint_location_bytes"] - retained_location_bytes
+                )
+                if not _fits_trace_budget(location, remaining_bytes):
+                    locations_truncated = True
+                    continue
+                location_bytes = len(json.dumps(location).encode("utf-8"))
+                addition = location_bytes + (1 if locations else 0)
+                if addition > remaining_bytes:
+                    locations_truncated = True
+                    continue
+                locations.append(location)
+                retained_location_bytes += addition
         report.append({"index": index, "location_count": count, "locations": locations})
     return report, locations_truncated
 
@@ -555,6 +568,38 @@ def _failed_launch_description(process):
     return None
 
 
+def _retire_failed_launch(process, config, listener, stdout, stderr):
+    """Reconcile an SBProcess returned alongside a failed Launch error."""
+    if not process.IsValid():
+        stdout.close()
+        stderr.close()
+        return False
+
+    pid = process.GetProcessID()
+    if pid > 0:
+        # Even an already-exited process needs its PID published so the host
+        # can distinguish a completed launch failure from an unknown target.
+        with open(config["pid_path"], "w") as handle:
+            handle.write(str(pid))
+
+    if process.GetState() != lldb.eStateExited:
+        stdout.mark_launched()
+        stderr.mark_launched()
+        if pid > 0:
+            # Hold a surviving target until the host has captured its start
+            # identity. If that proof is unavailable, Kill still addresses
+            # this exact SBProcess created by the current launch request.
+            _wait_for_identity_ack(config)
+        process.Kill()
+        _wait_for_exit(listener, process, 5)
+
+    exit_observed = process.GetState() == lldb.eStateExited
+    expected_exit = exit_observed
+    stdout.close(expected_exit=expected_exit)
+    stderr.close(expected_exit=expected_exit)
+    return exit_observed
+
+
 def trace(debugger, config):
     global _TRACE_CONTEXT
     debugger.SetAsync(True)
@@ -567,18 +612,27 @@ def trace(debugger, config):
         before_digest = _hash_file(config["executable"])
         before_identity = _file_identity(config["executable"])
     except OSError as error:
-        return {"status": "target-integrity-error", "error": str(error)}
+        return {
+            "status": "target-integrity-error",
+            "error": str(error),
+            "target_process_created": False,
+        }
     if before_digest != config["expected_sha256"]:
         return {
             "status": "target-integrity-error",
             "error": "selected executable digest changed before LLDB target creation",
+            "target_process_created": False,
         }
     error = lldb.SBError()
     target = debugger.CreateTarget(
         config["executable"], config["architecture"], None, False, error
     )
     if not target.IsValid():
-        return {"status": "target-error", "error": error.GetCString()}
+        return {
+            "status": "target-error",
+            "error": error.GetCString(),
+            "target_process_created": False,
+        }
     module_path_before, module_file_identity_before, module_uuid_before = (
         _module_identity(target)
     )
@@ -589,6 +643,7 @@ def trace(debugger, config):
         return {
             "status": "target-integrity-error",
             "error": "LLDB executable module resolved to a different pre-launch file identity",
+            "target_process_created": False,
         }
     created = [_create_breakpoints(target, spec) for spec in config["breakpoints"]]
     breakpoint_index = {}
@@ -596,7 +651,7 @@ def trace(debugger, config):
         for breakpoint in breakpoints:
             breakpoint_index[breakpoint.GetID()] = index
     listener = lldb.SBListener(LISTENER_NAME)
-    output_budget = config.get("max_output_bytes", MAX_TARGET_OUTPUT_BYTES)
+    output_budget = config["capture_limits"]["output_bytes"]
     stdout = _OutputPipe(
         config["stdout_path"], config["stdout_capture_path"], output_budget
     )
@@ -616,18 +671,40 @@ def trace(debugger, config):
         observation_path = config.get("observation_path")
         if observation_path:
             observation_journal = _ObservationJournal(
-                open(observation_path, "wb")
+                open(observation_path, "wb"),
+                config["capture_limits"]["trace_bytes"],
             )
         process = target.Launch(_launch_info(target, config, listener), error)
-        if not error.Success() or not process.IsValid():
-            stdout.close()
-            stderr.close()
-            return {"status": "launch-error", "error": error.GetCString()}
+        process_created = process.IsValid()
+        if not error.Success() or not process_created:
+            exit_observed = _retire_failed_launch(
+                process, config, listener, stdout, stderr
+            )
+            return {
+                "status": "launch-error",
+                "error": error.GetCString(),
+                "target_process_created": process_created,
+                **(
+                    {"target_process_exit_observed": True}
+                    if exit_observed
+                    else {}
+                ),
+            }
         launch_failure = _failed_launch_description(process)
         if launch_failure is not None:
-            stdout.close(expected_exit=True)
-            stderr.close(expected_exit=True)
-            return {"status": "launch-error", "error": launch_failure}
+            exit_observed = _retire_failed_launch(
+                process, config, listener, stdout, stderr
+            )
+            return {
+                "status": "launch-error",
+                "error": launch_failure,
+                "target_process_created": True,
+                **(
+                    {"target_process_exit_observed": True}
+                    if exit_observed
+                    else {}
+                ),
+            }
         stdout.mark_launched()
         stderr.mark_launched()
         # Publish the PID before any post-launch file or module inspection. The
@@ -644,6 +721,7 @@ def trace(debugger, config):
             return {
                 "status": "target-identity-unavailable",
                 "error": "host could not establish the launched process identity; target was stopped",
+                "target_process_created": True,
             }
         try:
             after_digest = _hash_file(config["executable"])
@@ -652,7 +730,11 @@ def trace(debugger, config):
             process.Kill()
             stdout.close(expected_exit=process.GetState() == lldb.eStateExited)
             stderr.close(expected_exit=process.GetState() == lldb.eStateExited)
-            return {"status": "target-integrity-error", "error": str(identity_error)}
+            return {
+                "status": "target-integrity-error",
+                "error": str(identity_error),
+                "target_process_created": True,
+            }
         if after_digest != config["expected_sha256"] or after_identity != before_identity:
             process.Kill()
             _wait_for_exit(listener, process, 5)
@@ -661,6 +743,7 @@ def trace(debugger, config):
             return {
                 "status": "target-integrity-error",
                 "error": "selected executable digest or file identity changed during LLDB launch",
+                "target_process_created": True,
             }
         module_path_after, module_file_identity_after, module_uuid_after = (
             _module_identity(target)
@@ -676,6 +759,7 @@ def trace(debugger, config):
             return {
                 "status": "target-integrity-error",
                 "error": "LLDB executable module resolved to a different file identity",
+                "target_process_created": True,
             }
         if (
             module_uuid_before is not None
@@ -689,6 +773,7 @@ def trace(debugger, config):
             return {
                 "status": "target-integrity-error",
                 "error": "LLDB executable module identity changed during launch",
+                "target_process_created": True,
             }
         context = {
             "target": target,
@@ -748,7 +833,11 @@ def trace(debugger, config):
         # exit code; preserve the debugger's concrete launch denial.
         launch_failure = _failed_launch_description(process)
         if launch_failure is not None:
-            return {"status": "launch-error", "error": launch_failure}
+            return {
+                "status": "launch-error",
+                "error": launch_failure,
+                "target_process_created": True,
+            }
         launch_identity_stable = (
             module_path_before is not None
             and module_path_after == module_path_before
@@ -774,6 +863,7 @@ def trace(debugger, config):
             "breakpoint_locations_truncated": breakpoint_locations_truncated,
             "events": events,
             "resource_limit_reached": outcome == "resource-limit",
+            "resource_limit": context.get("resource_limit"),
             "target_output": {
                 "stdout_bytes": stdout.bytes,
                 "stderr_bytes": stderr.bytes,

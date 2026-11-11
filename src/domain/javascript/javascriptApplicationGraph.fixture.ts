@@ -50,6 +50,7 @@ export const artifactEvidence = (
   authority:
     | "artifact-bytes"
     | "ast-static-analysis"
+    | "managed-static-analysis"
     | "native-analysis-provider" = "artifact-bytes",
 ): ApplicationGraphEvidence => ({
   authority,
@@ -254,7 +255,11 @@ const buildNativeRuntimeNodes = (): FixtureNode[] => [
       key: "openProject",
     },
     "openProject",
-    { calling_convention: "napi" },
+    {
+      calling_convention: "napi",
+      specifier: "native/synthetic.node",
+      members: ["openProject"],
+    },
     artifactEvidence(
       APPLICATION_GRAPH_DIGESTS.nativeAddon,
       "native/synthetic.node",

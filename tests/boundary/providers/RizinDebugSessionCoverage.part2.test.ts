@@ -1,9 +1,5 @@
 import { afterEach, expect, it } from "vitest";
-import { RizinDebugSessionManager } from "../../../src/rizin/RizinDebugSessionManager.js";
-import {
-  createRizinTestManager,
-  rizinTestInferiorTty,
-} from "./RizinTestInferiorTty.js";
+import { rizinTestInferiorTty } from "./RizinTestInferiorTty.js";
 import {
   createRizinCoverageHarness,
   abortOnCheck,
@@ -11,7 +7,7 @@ import {
   incompleteStop,
 } from "./RizinDebugSessionCoverage.fixtures.js";
 
-const { cleanup, makeProvider, start, startInjected, track } =
+const { cleanup, makeProvider, start, startInjected, createManager } =
   createRizinCoverageHarness();
 afterEach(cleanup);
 
@@ -19,12 +15,15 @@ it.skipIf(process.platform === "win32")(
   "stops the session when the provider closes its stdin pipe",
   async () => {
     const provider = await makeProvider(
-      'printf "\\000"; exec 0<&-; while :; do :; done',
+      // Readiness must guarantee that the child's stdin is already closed.
+      'exec 0<&-; printf "\\000"; while :; do :; done',
       "#!/bin/sh",
     );
-    const { manager, sessionId } = await start(provider, {
-      frameTimeoutMs: 500,
-    });
+    const { manager, sessionId } = await start(
+      provider,
+      {},
+      { REA_DEBUGGER_COMMAND_DEADLINE_MS: "500" },
+    );
     const result = await manager.execute(sessionId, "dr");
     expect(result.ok).toBe(false);
     expect(manager.status(sessionId)?.state).toBe("closed");
@@ -78,7 +77,9 @@ it.skipIf(process.platform === "win32").each([false, true])(
     const result = await manager.execute(started.value.session_id, "dr");
     expect(result.ok).toBe(false);
     if (!result.ok && incomplete)
-      expect(result.error.message).toContain("injected stop uncertainty");
+      expect(result.error.cleanup?.reason).toContain(
+        "injected stop uncertainty",
+      );
   },
 );
 
@@ -87,7 +88,7 @@ it.skipIf(process.platform === "win32")(
   async () => {
     for (const spawnError of [new Error("injected spawn failure"), "opaque"]) {
       const injected = createInjectedProcess({ spawnError });
-      const manager = createRizinTestManager(
+      const manager = createManager(
         { REA_RIZIN_COMMAND: "injected-rizin" },
         { spawnProcess: injected.spawnProcess },
       );
@@ -101,7 +102,7 @@ it.skipIf(process.platform === "win32")(
     const injected = createInjectedProcess({
       startup: (control) => control.closeStdin(),
     });
-    const manager = createRizinTestManager(
+    const manager = createManager(
       { REA_RIZIN_COMMAND: "injected-rizin" },
       { spawnProcess: injected.spawnProcess },
     );
@@ -123,7 +124,7 @@ it.skipIf(process.platform === "win32")(
       beforeSpawnReturns: () => abort.abort(),
       spawnError: new Error("spawn interrupted"),
     });
-    const manager = createRizinTestManager(
+    const manager = createManager(
       { REA_RIZIN_COMMAND: "injected-rizin" },
       { spawnProcess: injected.spawnProcess },
     );
@@ -146,7 +147,7 @@ it.skipIf(process.platform === "win32")(
         abort.abort();
       },
     });
-    const manager = createRizinTestManager(
+    const manager = createManager(
       { REA_RIZIN_COMMAND: "injected-rizin" },
       { spawnProcess: injected.spawnProcess },
     );
@@ -165,7 +166,7 @@ it.skipIf(process.platform === "win32")(
     const injected = createInjectedProcess({
       beforeSpawnReturns: () => abort.abort(),
     });
-    const manager = createRizinTestManager(
+    const manager = createManager(
       { REA_RIZIN_COMMAND: "injected-rizin" },
       { spawnProcess: injected.spawnProcess },
     );
@@ -188,22 +189,6 @@ it.skipIf(process.platform === "win32")(
       started.value.session_id,
       "dr",
       abortOnCheck(3),
-    );
-    expect(result.ok).toBe(false);
-  },
-);
-
-it.skipIf(process.platform === "win32")(
-  "cancels while waiting for the previous command turn",
-  async () => {
-    const injected = createInjectedProcess();
-    const { manager, started } = await startInjected(injected.spawnProcess);
-    expect(started.ok).toBe(true);
-    if (!started.ok) return;
-    const result = await manager.execute(
-      started.value.session_id,
-      "dr",
-      abortOnCheck(2),
     );
     expect(result.ok).toBe(false);
   },

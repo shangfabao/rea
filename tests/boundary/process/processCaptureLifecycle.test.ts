@@ -1,10 +1,17 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { access, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { expect, vi } from "vitest";
+import { expect, onTestFinished, vi } from "vitest";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { itWithCaptureCapability } from "./processCaptureCapability.js";
 
@@ -17,12 +24,14 @@ import { snapshotRoots } from "../../../src/process/capture/FilesystemSnapshot.j
 import { ProcessCaptureError } from "../../../src/process/capture/ProcessCaptureError.js";
 import { expectUnverifiedHostCleanup } from "../../support/hostCleanup.js";
 import {
+  ProcessCaptureResourceScope,
   type ProcessCaptureCleanupHost,
   observeLaunchedExecutable,
   observeSelectedExecutable,
 } from "../../../src/process/capture/ProcessCaptureLifecycle.js";
-import { parseProcessScenario } from "../../../src/domain/process/processScenario.js";
+import { processScenarioSchema } from "../../../src/domain/process/processScenario.js";
 import { emptyProcessCapture } from "../../../src/domain/process/processCapture.fixture.js";
+import { processSourceTruncated } from "../../../src/domain/process/processCaptureCoverage.js";
 import type { ProcessCapture } from "../../../src/domain/process/processCaptureParsing.js";
 
 const processFixture = fileURLToPath(
@@ -124,32 +133,86 @@ const terminateFixtureProcess = async (pid: number): Promise<void> => {
 };
 
 itWithCaptureCapability(
-  "keeps the process deadline bounded when the wall clock moves backward",
+  "retains a deleted observed file when its parent becomes a regular file",
   async () => {
-    const wallStart = Date.now();
-    let wallReads = 0;
-    const now = vi.spyOn(Date, "now").mockImplementation(() => {
-      wallReads += 1;
-      return wallReads === 1 ? wallStart : wallStart - 60_000 + wallReads;
-    });
-    const controller = new AbortController();
-    const fallback = setTimeout(() => controller.abort(), 1_500);
+    const root = await createTestTempDirectory("rea-observed-parent-type-");
+    const payload = '{"result":42}\n';
+    await mkdir(join(root, "reports"));
+    await writeFile(join(root, "reports", "final.json"), payload);
+    const result = await captureProcessScenario(
+      processScenarioSchema.parse({
+        executable: process.execPath,
+        arguments: [
+          "-e",
+          `const fs = require('node:fs');
+           fs.renameSync('reports', 'saved-reports');
+           fs.writeFileSync('reports', 'regular file'); console.log('finished');`,
+        ],
+        working_directory: root,
+        filesystem_observation_paths: [join(root, "reports", "final.json")],
+        timeout_ms: 5_000,
+        idle_timeout_ms: 5_000,
+        settle_ms: 100,
+      }),
+    );
+    if (!result.ok) throw result.error;
+    expect(result.value.exit).toMatchObject({ code: 0, reason: "exited" });
+    expect(result.value.filesystem_effects).toContainEqual(
+      expect.objectContaining({
+        path: "root_0:.",
+        status: "deleted",
+        before: expect.objectContaining({
+          type: "file",
+          sha256: createHash("sha256").update(payload).digest("hex"),
+        }),
+        after: null,
+      }),
+    );
+    expect(
+      await readFile(join(root, "saved-reports", "final.json"), "utf8"),
+    ).toBe(payload);
+  },
+);
+
+itWithCaptureCapability(
+  "keeps the process deadline bounded when the wall clock moves backward",
+  async ({ signal }) => {
+    let wallNow = Date.now();
+    const now = vi.spyOn(Date, "now").mockImplementation(() => wallNow);
+    const resources = new ProcessCaptureResourceScope();
+    let reachedRunning = false;
+    onTestFinished(async () => {
+      now.mockRestore();
+      await resources.close();
+    }, 10_000);
     try {
       const result = await captureProcessScenario(
-        parseProcessScenario({
+        processScenarioSchema.parse({
           executable: process.execPath,
           arguments: [processFixture, "hang"],
           working_directory: dirname(processFixture),
           timeout_ms: 100,
           idle_timeout_ms: 5_000,
         }),
-        controller.signal,
+        signal,
+        process.platform,
+        process.env,
+        undefined,
+        undefined,
+        {
+          async report(update) {
+            if (update.phase === "running" && !reachedRunning) {
+              reachedRunning = true;
+              wallNow -= 60_000;
+            }
+          },
+        },
+        resources,
       );
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw result.error;
-      expect(result.value.exit.reason).toBe("timeout");
+      expect(reachedRunning).toBe(true);
+      const { capture } = captureObservations(result);
+      expect(capture.exit.reason).toBe("timeout");
     } finally {
-      clearTimeout(fallback);
       now.mockRestore();
     }
   },
@@ -163,7 +226,7 @@ itWithCaptureCapability(
     vi.setSystemTime(new Date("2026-01-02T00:00:00.000Z"));
     try {
       const result = await captureProcessScenario(
-        parseProcessScenario({
+        processScenarioSchema.parse({
           executable: process.execPath,
           arguments: [processFixture, "partial"],
           working_directory: dirname(processFixture),
@@ -183,14 +246,15 @@ itWithCaptureCapability(
           },
         },
       );
-      expect(result.ok).toBe(true);
       if (!result.ok) throw result.error;
       expect(result.value.frames.length).toBeGreaterThan(0);
       expect(Date.parse(result.value.manifest.completed_at)).toBeLessThan(
         Date.parse(result.value.manifest.started_at),
       );
-      expect(result.value.limitations).toContain(
-        "Wall-clock completion time precedes start time; elapsed capture timing is recorded separately and remains monotonic.",
+      expect(result.value.limitations).toContainEqual(
+        expect.stringMatching(
+          /completion time precedes start time.*elapsed.*monotonic/iu,
+        ),
       );
       expect(
         result.value.frames.map(({ at_ms }) => at_ms),
@@ -219,7 +283,7 @@ itWithCaptureCapability(
     let unownedPid: number | undefined;
     try {
       const result = await captureProcessScenario(
-        parseProcessScenario({
+        processScenarioSchema.parse({
           executable: process.execPath,
           arguments: [processFixture, "detached-cleanup", pidMarker],
           working_directory: root,
@@ -290,7 +354,14 @@ itWithCaptureCapability(
   "retains collected observations when completion and cleanup both fail",
   async () => {
     let snapshotCalls = 0;
-    const captureSnapshot: typeof snapshotRoots = async () => {
+    const snapshotObserverPaths: string[][] = [];
+    const captureSnapshot: typeof snapshotRoots = async (
+      _scenario,
+      _signal,
+      _before,
+      resources,
+    ) => {
+      snapshotObserverPaths.push([...(resources?.observerPaths ?? [])]);
       snapshotCalls += 1;
       if (snapshotCalls === 1)
         return {
@@ -307,15 +378,11 @@ itWithCaptureCapability(
         cleaned: false,
         reason: "fixture cleanup could not be verified",
       }),
-      verifyTokenOwnedProcesses: async () => ({
-        cleaned: false,
-        reason: "fixture cleanup could not be verified",
-      }),
       removeTemporaryRoot: async (path) =>
         rm(path, { recursive: true, force: true }),
     };
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [processFixture, "partial"],
         working_directory: dirname(processFixture),
@@ -337,12 +404,16 @@ itWithCaptureCapability(
     expect(result.error.executionFailure).toBe(
       "fixture final snapshot failure",
     );
+    const temporaryRoot = snapshotObserverPaths[0]?.[0];
+    if (temporaryRoot === undefined)
+      throw new Error("expected the owned temporary root in snapshot inputs");
+    expect(snapshotObserverPaths).toEqual([[temporaryRoot], [temporaryRoot]]);
     const projected = projectAnalysisError(result.error);
     expect(projected).toMatchObject({
       code: "cleanup_incomplete",
       details: {
         cleanup: "incomplete",
-        resources: ["owned_process_group", "temporary_root"],
+        resources: ["owned_process_group", temporaryRoot],
       },
     });
     expect(projected).not.toHaveProperty("stack");
@@ -381,8 +452,9 @@ itWithCaptureCapability(
     );
     expect(observations.filesystem_snapshots.after).toEqual({
       state: "unavailable",
-      reason:
-        "Final filesystem snapshot failed: fixture final snapshot failure",
+      reason: expect.stringMatching(
+        /final.*snapshot.*fixture final snapshot failure/i,
+      ),
     });
     expect(observations.event_journal.state).toBe("available");
     if (observations.event_journal.state !== "available")
@@ -433,7 +505,7 @@ itWithCaptureCapability(
       .digest("hex");
     try {
       const capturePromise = captureProcessScenario(
-        parseProcessScenario({
+        processScenarioSchema.parse({
           executable,
           arguments: [processFixture, "ready-hang", readyMarker],
           working_directory: root,
@@ -465,8 +537,10 @@ itWithCaptureCapability(
         },
       });
       expect(capture.exit.reason).toBe("timeout");
-      expect(capture.limitations).toContain(
-        "The executable digest is a prelaunch file sample; matching path metadata immediately after spawn does not prove an atomic operating-system image binding.",
+      expect(capture.limitations).toContainEqual(
+        expect.stringMatching(
+          /digest.*prelaunch.*path metadata.*does not prove.*atomic.*image binding/iu,
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -482,7 +556,7 @@ itWithCaptureCapability(
     await symlink("/etc/passwd", join(root, "escape"));
     try {
       const result = await captureProcessScenario(
-        parseProcessScenario({
+        processScenarioSchema.parse({
           executable: "/usr/bin/true",
           working_directory: root,
           filesystem_observation_paths: [root],
@@ -493,7 +567,18 @@ itWithCaptureCapability(
         file.path.endsWith(":escape"),
       );
       expect(escaped?.symlink_target).toBe("/etc/passwd");
-      expect(capture.truncated).toBe(false);
+      expect(processSourceTruncated(capture, "filesystem")).toBe(true);
+      for (const coverage of [
+        capture.truncation_details.filesystem_before,
+        capture.truncation_details.filesystem_after,
+      ]) {
+        expect(coverage.enumeration_reasons).toContain("symlink_not_followed");
+        expect(coverage.enumeration_omissions).toContainEqual({
+          path: escaped?.path,
+          reason: "symlink_not_followed",
+          system_code: null,
+        });
+      }
       expect(JSON.stringify(capture.files_after)).not.toContain(root);
       expect(
         capture.files_after.some((file) => file.path.includes("passwd")),
@@ -508,7 +593,7 @@ itWithCaptureCapability(
   "distinguishes timeout from cancellation and cleans both runs",
   async () => {
     const timedOut = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [processFixture, "hang"],
         working_directory: dirname(processFixture),
@@ -534,9 +619,9 @@ itWithCaptureCapability(
     }
 
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 50);
+    let reachedRunning = false;
     const cancelled = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [processFixture, "hang"],
         working_directory: dirname(processFixture),
@@ -544,9 +629,43 @@ itWithCaptureCapability(
         idle_timeout_ms: 5_000,
       }),
       controller.signal,
+      process.platform,
+      process.env,
+      undefined,
+      undefined,
+      {
+        async report(update) {
+          if (update.phase === "running") {
+            reachedRunning = true;
+            controller.abort();
+          }
+        },
+      },
     );
     if (cancelled.ok) throw new Error("expected cancellation");
-    expect(cancelled.error.message).toContain("cancelled");
+    expect(reachedRunning).toBe(true);
+    if (!(cancelled.error instanceof ProcessCaptureError))
+      throw cancelled.error;
+    if (cancelled.error.cleanupIncomplete)
+      expectUnverifiedHostCleanup(cancelled.error);
+    else
+      expect(cancelled.error.cleanupReport).toMatchObject({
+        owned_process_group: { state: "cleaned" },
+        terminal_renderer: { state: "cleaned" },
+        temporary_root: { state: "cleaned" },
+      });
+    const cancellation = cancelled.error.cleanupIncomplete
+      ? cancelled.error.cause
+      : cancelled.error;
+    expect(cancellation, cancelled.error.message).toMatchObject({
+      reason: "cancelled",
+      userCategory: "cancelled",
+    });
+    expect(cancelled.error.partialObservation).toMatchObject({
+      observations: {
+        exit: { state: "available", value: { reason: "cancelled" } },
+      },
+    });
   },
 );
 
@@ -561,7 +680,7 @@ const captureFinalizationFixture = async (
 ): Promise<{ readonly result: CaptureRun; readonly root: string }> => {
   const root = await createTestTempDirectory("rea-finalization-");
   const result = await captureProcessScenario(
-    parseProcessScenario({
+    processScenarioSchema.parse({
       executable: process.execPath,
       arguments: [finalizationFixture, mode, root],
       working_directory: root,
@@ -854,7 +973,7 @@ itWithCaptureCapability(
     };
     const root = await createTestTempDirectory("rea-finalization-host-");
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [finalizationFixture, "ignoring", root],
         working_directory: root,
@@ -928,7 +1047,7 @@ itWithCaptureCapability(
     });
 
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         working_directory: root,
         filesystem_observation_paths: [path],
@@ -962,7 +1081,7 @@ itWithCaptureCapability(
       return snapshot;
     };
     const resultPromise = captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [snapshotCancellationFixture, root],
         working_directory: dirname(snapshotCancellationFixture),
@@ -1012,7 +1131,7 @@ itWithCaptureCapability(
     };
 
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         working_directory: root,
         filesystem_observation_paths: [join(obstruction, "child")],
@@ -1035,7 +1154,7 @@ itWithCaptureCapability(
   "captures input, Unicode, and resize across PTY startup",
   async () => {
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [processFixture, "interactive"],
         working_directory: dirname(processFixture),
@@ -1073,7 +1192,7 @@ itWithCaptureCapability(
   "dispatches an external signal without depending on child startup output",
   async () => {
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [processFixture, "hang"],
         working_directory: dirname(processFixture),
@@ -1086,7 +1205,11 @@ itWithCaptureCapability(
     expect(capture.interaction_events).toMatchObject([
       { type: "signal", data: "SIGTERM", outcome: "dispatched" },
     ]);
-    expect(capture.exit).toMatchObject({ signal: 15, reason: "exited" });
+    expect(capture.exit).toMatchObject({
+      code: null,
+      signal: 15,
+      reason: "exited",
+    });
   },
 );
 
@@ -1094,7 +1217,7 @@ itWithCaptureCapability(
   "buffers newline input until a silent PTY fixture is ready to read it",
   async () => {
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [processFixture, "silent-interactive"],
         working_directory: dirname(processFixture),
@@ -1130,7 +1253,7 @@ itWithCaptureCapability(
   "samples and cleans a source-owned child and grandchild process tree",
   async () => {
     const result = await captureProcessScenario(
-      parseProcessScenario({
+      processScenarioSchema.parse({
         executable: process.execPath,
         arguments: [processFixture, "tree"],
         working_directory: dirname(processFixture),

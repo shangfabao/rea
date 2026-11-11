@@ -3,7 +3,10 @@ import { expect, it } from "vitest";
 import { AdbDeviceAnalysisService } from "./AdbDeviceAnalysisService.js";
 import type { AdbDeviceAnalysisPort } from "./AdbDeviceAnalysisPort.js";
 import { createAnalysisExecution } from "../AnalysisProvider.js";
-import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisInputError,
+} from "../../domain/analysisErrorCore.js";
 import { parseEvidence } from "../../domain/evidence.js";
 import { ok } from "../../domain/result.js";
 
@@ -34,6 +37,7 @@ const refusedPort: AdbDeviceAnalysisPort = {
 };
 
 it.each([
+  [{}],
   [{ serial: "" }],
   [{ serial: "has space" }],
   [{ serial: "emulator-5554", scope: "unknown" }],
@@ -46,11 +50,51 @@ it.each([
   });
 });
 
+it.each([
+  [{ component: "example.app" }, ["component"]],
+  [{ component: "example.app/" }, ["component"]],
+  [
+    { extras: [{ key: "count", type: "int", value: "2147483648" }] },
+    ["extras", 0, "value"],
+  ],
+  [
+    { extras: [{ key: "count", type: "int", value: "-2147483649" }] },
+    ["extras", 0, "value"],
+  ],
+  [
+    { extras: [{ key: "count", type: "long", value: "9223372036854775808" }] },
+    ["extras", 0, "value"],
+  ],
+  [
+    { extras: [{ key: "count", type: "long", value: "-9223372036854775809" }] },
+    ["extras", 0, "value"],
+  ],
+] as const)(
+  "rejects an unrepresentable activity argument before any effect: %j",
+  async (input, path) => {
+    const service = new AdbDeviceAnalysisService(refusedPort);
+    const result = await service.execute("start_adb_activity", {
+      serial: "fixture",
+      action: "example.TEST",
+      ...input,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { _tag: "AnalysisInputError", issues: [{ path }] },
+    });
+  },
+);
+
 it("rejects an unknown operation before any effect", async () => {
   const service = new AdbDeviceAnalysisService(refusedPort);
-  expect(
-    await service.execute("inspect_adb_device" as never, {}),
-  ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
+  const result = await service.execute("unknown_adb_operation" as never, {});
+  if (result.ok) throw new Error("Expected an unknown operation refusal");
+  expect(result.error).toBeInstanceOf(AnalysisInputError);
+  if (!(result.error instanceof AnalysisInputError)) throw result.error;
+  expect(result.error.operation).toBe("unknown_adb_operation");
+  expect(result.error.issues).toContainEqual(
+    expect.objectContaining({ path: ["operation"] }),
+  );
 });
 
 it("composes observed Evidence with the caller parameters inline", async () => {
@@ -81,7 +125,8 @@ it("composes observed Evidence with the caller parameters inline", async () => {
 
 it("preserves cancellation before execution", async () => {
   const controller = new AbortController();
-  controller.abort();
+  const cancellationReason = { source: "caller", operation: "shutdown" };
+  controller.abort(cancellationReason);
   const service = new AdbDeviceAnalysisService(refusedPort);
   const result = await service.execute(
     "list_adb_devices",
@@ -90,7 +135,7 @@ it("preserves cancellation before execution", async () => {
       signal: controller.signal,
     },
   );
-  expect(result.ok).toBe(false);
-  if (result.ok) return;
+  if (result.ok) throw new Error("Expected cancellation before execution");
   expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+  expect(result.error.cause).toBe(cancellationReason);
 });
