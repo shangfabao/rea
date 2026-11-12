@@ -2,7 +2,7 @@
 ---
 
 
-## [6.9.0](https://github.com/shangfabao/rea/compare/rea-agents-6.8.0...rea-agents-6.9.0) (2026-11-11)
+## [6.9.0](https://github.com/shangfabao/rea/compare/rea-agents-6.8.0...rea-agents-6.9.0) (2026-11-12)
 
 
 ### ⚠ BREAKING CHANGES
@@ -1977,6 +1977,7 @@
 * **codeql:** separate production scans from test fixtures ([#8450](https://github.com/shangfabao/rea/issues/8450)) ([a6caa79](https://github.com/shangfabao/rea/commit/a6caa79bf4f393c02601fbf2f6df246eae0b1558))
 * **environment:** pin the real agentenv lane to agentenv-framework 0.9.1431 ([#8865](https://github.com/shangfabao/rea/issues/8865)) ([0ac6be1](https://github.com/shangfabao/rea/commit/0ac6be1a3de38a1c84ee128768ae0e692b99411c))
 * exempt designated authors from readiness declaration ([920d634](https://github.com/shangfabao/rea/commit/920d634e835ede760831bee51baabb054924f041))
+* fetch tags 加 --force 避免上游 tag clobber 失败 ([97e9de6](https://github.com/shangfabao/rea/commit/97e9de63dc935fe0405bcc1f8cdb41015642444b))
 * **ghidra:** probe M-profile ARM and Xtensa decoding ([#7482](https://github.com/shangfabao/rea/issues/7482)) ([19ab239](https://github.com/shangfabao/rea/commit/19ab2392781b923a2056ed6c7317e1b4e19c1066))
 * **limits:** inventory numeric REA_ limits and check them ([3b39991](https://github.com/shangfabao/rea/commit/3b39991b0295ad582f73f04edabe64ed5c6f9592))
 * push 步骤使用动态分支名 ([0e7fb3d](https://github.com/shangfabao/rea/commit/0e7fb3d93cb50abbf533cf7c6b9229f4c71c18c5))
