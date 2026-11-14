@@ -247,8 +247,10 @@ observation's own `limitations`, so a reason the provider reported for that
 entry, such as a Kuna export failure or a missing body, stays with the item.
 Null pseudocode is `capability_unavailable`; empty or non-text pseudocode is
 `unreadable_output`. Provider failures keep their typed error. Successful items
-do not repeat limitations; the batch Evidence aggregates every observation's
-limitations by provider and operation.
+also keep their own observation's limitations, so repeated selectors that the
+provider answered differently stay distinguishable, and an unavailable item
+keeps the provider's `pseudocode_absence` reason. The batch Evidence still
+aggregates every observation's limitations by provider and operation.
 Resolved entries also appear in the composed Evidence locations. New batch
 Evidence commits the revised workflow profile; retained historical Evidence
 remains valid. This tool
@@ -596,8 +598,10 @@ truncation; a depth or candidate limit is reported only when no other path
 analyzes or queues that destination. `total_nodes` and `total_edges` count
 retained rows. `truncated` remains true for either kind of omission. Failed
 analyses and unresolved calls stay in `unknowns` and do not truncate the
-traversal. Each page reruns analysis; pages are not pinned to one snapshot
-across session edits.
+traversal. A provider-classified thunk whose target the trace did not reach
+by any path adds an unknown that names the target in `related_procedure`; the
+target is reported, not traversed. Each page reruns analysis; pages are not
+pinned to one snapshot across session edits.
 
 The raw Java `is_dead` flag can remain set after Ghidra decodes a live block;
 `block_membership` reports actual syntax-tree membership separately.

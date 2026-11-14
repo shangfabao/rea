@@ -152,6 +152,10 @@ Exhausted traversals with deliberately omitted filesystem entries retain
 socket and device entries are not opened. Case-distinct archive members remain
 separate observations. Their case-insensitive materialization diagnostic does
 not reduce traversal coverage when both spellings were read.
+Each container reader declares its own traversal coverage, including complete
+coverage. A traversal that ends without that declaration, or that stops before
+its reader finishes, is `unknown` with a limitation naming the reader format;
+a complete traversal of one container never covers another.
 PyInstaller inventory also preserves distinct table rows that share a logical
 path, including decoded children beneath a colliding file/directory path.
 Inventory coverage describes observed archive facts; extraction still refuses
@@ -866,8 +870,9 @@ and provider identities:
 
 Page `coverage` counts the selection only: exhausting it establishes nothing
 about functions outside the batch. Evidence `limitations` aggregate every item's
-provider observations and are not attributed to one successful item; unavailable and error
-items keep their own. A page over the response budget offers a smaller selection
+provider observations; every item, successful or not, also keeps its own
+observation's limitations, and an unavailable item keeps the provider's
+`pseudocode_absence` reason when one was reported. A page over the response budget offers a smaller selection
 from the same `source`: fewer rows, or one body's `pseudocode` pages when a single
 row does not fit. An inline source offers none, because the record cannot be
 repeated in that reply; resend it with a smaller selection.
