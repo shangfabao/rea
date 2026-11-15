@@ -1,13 +1,20 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordPredicateCounts } from "./record-predicate-guard.mjs";
 import {
   compareCountedBaseline,
   recordLoweredBaseline,
+  reconcileBaselineFile,
 } from "./counted-baseline.mjs";
 import { localCompletenessEnumCount } from "./completeness-enum-guard.mjs";
 import { countKeyedFirstMatches } from "./keyed-first-match.mjs";
+import { budgetArithmeticCount } from "./budget-arithmetic-guard.mjs";
+import { localLimitErrorClassCount } from "./limit-class-guard.mjs";
+import {
+  TOOL_REGISTRATION_OWNERS,
+  toolRegistrationCount,
+} from "./tool-registration-guard.mjs";
 
 // Architecture guards for the strict-identity / best-effort-inference split.
 // - Composite dedup keys must not NUL-join variable-length or free-form
@@ -70,12 +77,35 @@ check(
 
 // Prerequisite inspection lifetime is an application contract shared by adapters.
 check(
-  "provider-owned inspection lifetime (use src/application/ProviderInspectionScope)",
+  "provider-owned inspection lifetime (use src/ports/ProviderInspectionScope)",
   files,
   /providers\/ProviderInspectionScope\.js/,
 );
 
 check("NUL-joined list key (use compositeKey)", files, /\.join\(["']\\0["']\)/);
+
+// Pushed effect invalidation (docs/adr/javascript/pushed-effect-invalidation.md).
+// Opaque-effect checks are private to javascriptSemanticEffectLog.ts, so the
+// compiler keeps readers on its questions, and only the log and its record
+// module read the recorded sites. A method read on an intrinsic
+// instance asks one owner, which checks the method, the instance's prototype
+// link and the intrinsic prototypes.
+check(
+  "reader-side read of recorded opaque effects (ask javascriptSemanticEffectLog.ts or the javascriptSemanticEffectRecord.ts accessors)",
+  files,
+  /\.opaqueEffects\b/u,
+  [
+    "src/domain/javascript/javascriptSemanticEffectLog.ts",
+    "src/domain/javascript/javascriptSemanticEffectRecord.ts",
+  ],
+);
+
+check(
+  "reader-side prototype-link member check (use isIntrinsicInstanceMethodCall)",
+  files,
+  /mayObserve\([^;]*\["__proto__"\]/u,
+  ["src/domain/javascript/javascriptSemanticIntrinsicInstances.ts"],
+);
 
 check(
   "direct transparent-wrapper unwrap outside javascriptAstValues (use unwrapJavaScriptExpression)",
@@ -264,15 +294,31 @@ check(
 // Counted baselines record the remaining copies of a pattern that has one
 // owner. A file may not gain copies and a baseline may not grow; when copies
 // are removed, `--shrink-baselines` lowers the recorded counts (and never
-// raises them) so the next removal cannot be undone silently.
-const baselinePath = join(
-  root,
-  "scripts/verify/architecture-guard-baselines.json",
+// raises them) so the next removal cannot be undone silently. Each guard's
+// baseline is its own file, scripts/verify/baselines/<key>.json, so changes
+// to different guards never edit the same file.
+const baselineDirectory = join(root, "scripts/verify/baselines");
+const baselineTexts = new Map();
+for (const name of await readdir(baselineDirectory)) {
+  if (!name.endsWith(".json")) {
+    failures.push(
+      `${relative(root, join(baselineDirectory, name))} is not a guard baseline; only <guard-key>.json files belong in ${relative(root, baselineDirectory)}.`,
+    );
+    continue;
+  }
+  baselineTexts.set(
+    name.slice(0, -".json".length),
+    await readFile(join(baselineDirectory, name), "utf8"),
+  );
+}
+const baselines = Object.fromEntries(
+  [...baselineTexts].map(([key, text]) => [key, JSON.parse(text)]),
 );
-const baselines = JSON.parse(await readFile(baselinePath, "utf8"));
+const checkedBaselineKeys = new Set();
 const shrinkBaselines = process.argv.includes("--shrink-baselines");
 let baselinesShrunk = false;
 const checkCounted = (label, key, selected, pattern, owners) => {
+  checkedBaselineKeys.add(key);
   const counts = new Map();
   for (const file of selected) {
     if (owners.includes(file.path)) continue;
@@ -305,6 +351,47 @@ const checkCounted = (label, key, selected, pattern, owners) => {
     );
 };
 
+// A provider failure's captured output comes from one owner,
+// capturedProviderOutput in src/process; local copies drift on byte counts
+// (retained or written) and on how output loss marks truncation.
+checkCounted(
+  "captured output copied from a process snapshot (use capturedProviderOutput from src/process/capturedProviderOutput)",
+  "captured-output-copy",
+  files,
+  /\bstdout: [\w.]+\.stdout\.text\b/gu,
+  ["src/process/capturedProviderOutput.ts"],
+);
+
+// Pushed effect invalidation (docs/adr/javascript/pushed-effect-invalidation.md).
+// Recorded effects belong to the effect log. A reader that reads an effect
+// index itself decides on its own which effect kinds and proofs apply; readers
+// ask the log instead. Every reader has moved; the remaining counts are the
+// producers that build these indexes (javascriptSemanticAmbientWrites.ts,
+// javascriptSemanticMemberMutations.ts, and javascriptSemanticAnalysis.ts,
+// which creates and settles them) and the timing-proof owner
+// (javascriptSemanticMutationInitializers.ts), whose position proofs over
+// recorded sites the log delegates to.
+checkCounted(
+  "read of a JavaScript effect index outside the effect log (ask javascriptSemanticEffectLog.ts)",
+  "javascript-effect-index-read",
+  files,
+  /\.(?:bindingWrites|memberWrites|escapedPaths|ambientWriteEffects|ambientEscapeEffects|ambientBindingWrites|ambientWrites|ambientEscapes)\b/gu,
+  ["src/domain/javascript/javascriptSemanticEffectLog.ts"],
+);
+
+// Effect timing has one owner (javascriptSemanticMutationInitializers.ts) and
+// one consumer, the effect log. Everything else asks the log whether an effect
+// may precede a read, naming the ordering it relies on.
+check(
+  "semanticEffectTiming outside the effect log (ask semanticEffectMayPrecede or a query in javascriptSemanticEffectLog.ts)",
+  files,
+  /\bsemanticEffectTiming\b/u,
+  [
+    "src/domain/javascript/javascriptSemanticEffectLog.ts",
+    "src/domain/javascript/javascriptSemanticMutationInitializers.ts",
+  ],
+);
+
 // Coverage status has one vocabulary, coverageStatusSchema in
 // src/domain/coverage.ts. A local enum that contains "complete" either copies
 // it or drops `unknown`, which forces an unknown producer to pick a side.
@@ -324,6 +411,55 @@ checkCounted(
   files,
   /new AnalysisCancelledError\(/gu,
   ["src/domain/analysisErrorCore.ts"],
+);
+
+// A limit a parser stopped at is a ParseFailureError<"limit"> (decodeLimit in
+// src/domain/parseFailure); a refusal is an AnalysisRefusal. A local limit
+// class on plain Error hides the limit's name and maximum from both; a limit
+// subclass of BinaryResourceFailure keeps a second limit field beside the
+// allowance its LimitRef already names. The environment-state extraction's private retention stop is control flow that
+// its own entry point catches and turns into `null`; it is never reported.
+checkCounted(
+  "local limit class (use decodeLimit from src/domain/parseFailure, a named BinaryResourceFailure allowance, or an AnalysisRefusal)",
+  "local-limit-error-class",
+  files,
+  localLimitErrorClassCount,
+  ["src/domain/analysisView/EnvironmentStateExtraction.ts"],
+);
+
+// A resource allowance is charged and refunded through `Budget` in
+// src/domain/budget, which refuses malformed or oversized charges without
+// changing the remainder. Hand-written `remaining -=` / `retained +=`
+// arithmetic repeats that admission and drifts (charge-then-check, no
+// safe-integer check).
+checkCounted(
+  "hand-written budget arithmetic (use Budget from src/domain/budget)",
+  "budget-arithmetic",
+  files,
+  budgetArithmeticCount,
+  ["src/domain/budget.ts"],
+);
+
+// A slice to a named maximum drops items; boundedList in src/domain/boundedList
+// keeps the count of what it dropped beside the retained items, so a consumer
+// can say that more exist and how many.
+checkCounted(
+  "slice to a named maximum (use boundedList or BoundedListCollector from src/domain/boundedList so the omitted count travels with the items)",
+  "constant-maximum-slice",
+  files,
+  /\.slice\(\s*0\s*,\s*[A-Z][A-Z0-9_]*\s*\)/gu,
+  ["src/domain/boundedList.ts"],
+);
+
+// Display text cut with an appended ellipsis comes from ellipsisExcerpt in
+// src/domain/excerpt, which never splits a surrogate pair and marks the result
+// as excerpt text. A hand-written `${text.slice(0, n)}…` does neither.
+checkCounted(
+  "hand-written ellipsis excerpt (use ellipsisExcerpt from src/domain/excerpt)",
+  "ad-hoc-ellipsis",
+  files,
+  /\.slice\(\s*0\s*,[^)]*\)\)?\}(?:…|\.\.\.)/gu,
+  ["src/domain/excerpt.ts"],
 );
 
 // A deadline is a monotonic budget owned by `Deadline` in src/domain/deadline;
@@ -395,6 +531,30 @@ checkCounted(
   ["src/gdb/GdbMiRecord.ts"],
 );
 
+// Services name the contract field they refuse or ask the caller to change;
+// the CLI layer owns option spellings (each command's field binding renames
+// issue paths to CLI keys). A `--flag` written outside src/cli copies that
+// mapping and goes stale when the command renames the option.
+checkCounted(
+  "REA CLI option named outside the CLI layer (name the contract field; src/cli owns option spellings)",
+  "cli-option-text-outside-cli",
+  files.filter(
+    ({ path }) =>
+      !path.startsWith("src/cli/") && !/^src\/cli[^/]*\.ts$/u.test(path),
+  ),
+  /\(CLI:? [^)\n]*--[a-z]|--[a-z][a-z0-9-]* on the CLI|or (?:use|pass) --[a-z]|\bcli(?:Flag|Total|PerFile)?:\s*"--[a-z]|(?:message|userMessage):\s*["`]--[a-z]/gu,
+  [],
+);
+
+// tool-registration-guard.mjs states the rule and its written owners.
+checkCounted(
+  "MCP tool registered outside the shared binding table (bind it in src/server/serviceToolBindings.ts)",
+  "bespoke-mcp-tool-registration",
+  files.filter(({ path }) => path.startsWith("src/")),
+  toolRegistrationCount,
+  [...TOOL_REGISTRATION_OWNERS.keys()],
+);
+
 // A runtime setting view throws the ConfigurationError of a malformed launch
 // seed; readRuntimeSetting in src/config/runtimeAnalysisSettings.ts returns it
 // as a Result. Catching it by hand mixes it into each site's own failures.
@@ -407,7 +567,7 @@ checkCounted(
 );
 
 // Byte-format parsers read untrusted input. Bounds, truncation and failure
-// kind belong to BinaryReader (src/native/metadata/BinaryContainer.ts) and
+// kind belong to BinaryReader (src/domain/binaryContainer.ts) and
 // the ParseFailure algebra (src/domain/parseFailure.ts), not to each parser.
 const PARSER_FOLDERS = [
   "src/android/",
@@ -425,6 +585,8 @@ const PARSER_FOLDERS = [
   "src/model/",
   "src/native/",
   "src/python/",
+  // Shared artifact readers (ZIP, directory, ASAR header) live in resources.
+  "src/resources/",
   "src/rust/",
   "src/v8/",
   "src/wasm/",
@@ -443,11 +605,13 @@ const PARSER_FOLDERS = [
     "managed",
     "model",
     "native",
+    "pcap",
     "python",
     "rust",
     "v8",
     "wasm",
     "windows",
+    "zip",
   ].map((folder) => `src/domain/${folder}/`),
 ];
 const parserFiles = files.filter((file) =>
@@ -457,11 +621,11 @@ const parserFiles = files.filter((file) =>
 // An unchecked Buffer or DataView read throws a bare RangeError past the end,
 // which a catch site cannot tell from a host stack or string limit.
 checkCounted(
-  "raw Buffer or DataView numeric read (use BinaryReader from src/native/metadata/BinaryContainer)",
+  "raw Buffer or DataView numeric read (use BinaryReader from src/domain/binaryContainer)",
   "raw-buffer-read",
   files,
   /\.(?:read(?:Big)?U?Int(?:8|16|32|64)?(?:LE|BE)?|readBigUint64(?:LE|BE)|readUint(?:8|16|32)(?:LE|BE)?|read(?:Float|Double)(?:LE|BE)|get(?:Big)?(?:Uint|Int)(?:8|16|32|64)|getFloat(?:32|64))\(/gu,
-  ["src/native/metadata/BinaryContainer.ts"],
+  ["src/domain/binaryContainer.ts"],
 );
 
 // An input fault is a ParseFailureError; a broken internal assumption is a
@@ -533,6 +697,20 @@ checkCounted(
   [],
 );
 
+// Raw JSON Schema keywords and `x-rea-*` markers in `.meta()` bypass the
+// canonical Zod checks and reach every JSON Schema projection, including the
+// advertised one. Presentation facts are typed annotations
+// (src/domain/schemaAnnotations); constraints belong in Zod checks, or in a
+// src/domain/schemaConstraints helper that adds the check and its keyword
+// together.
+checkCounted(
+  "raw JSON Schema keyword or x-rea marker in Zod .meta() (use a typed annotation from src/domain/schemaAnnotations, a Zod check, or a src/domain/schemaConstraints helper)",
+  "raw-json-schema-meta",
+  files,
+  /\.meta\(\s*\{\s*"?(?:x-rea-[\w-]+|\$ref|not|allOf|anyOf|oneOf|if|then|else|dependentRequired|dependentSchemas|dependencies|uniqueItems|(?:min|max)(?:Length|Items|Properties|imum)|exclusive(?:Min|Max)imum|multipleOf|type|const|enum|format|pattern|patternProperties|properties|required|additionalProperties|items|prefixItems|contains|content(?:MediaType|Encoding|Schema)|propertyNames)"?\s*:/gu,
+  ["src/domain/schemaConstraints.ts"],
+);
+
 // A RangeError can mean a stack overflow, a host string or buffer limit, a
 // raw read or write past a buffer, or whatever its thrower intended. Only
 // known host limits are classified; parsers throw a ParseFailureError.
@@ -548,7 +726,7 @@ checkCounted(
 // AnalysisError has no push API. Composing dependency sets with
 // bindCleanupDependencies() is being replaced, so it may not spread.
 checkCounted(
-  "bindCleanupDependencies() composition outside the error base (compose through analysisErrorWithCleanupDependencies or runOwned, or copy lease claims)",
+  "bindCleanupDependencies() composition outside the error base (compose through analysisErrorWithCleanupDependencies, analysisErrorWithCloseRejection(s) for close rejections whose completion may be unknown, or runOwned, or copy lease claims)",
   "cleanup-dependency-binding",
   files,
   /\.bindCleanupDependencies\(/gu,
@@ -570,18 +748,25 @@ checkCounted(
 // takes it from there and passes the platform or architecture on as a
 // required parameter. An ambient read elsewhere mixes the host REA runs on
 // with the host a caller asked about, and cannot be selected by a test.
+// Named imports from node:process or node:os and os.platform()/os.arch() are
+// the same read under another spelling.
+const ambientHostRead = (property, osFunction) =>
+  new RegExp(
+    String.raw`\bprocess\.${property}\b|\bos\.${osFunction}\(\)|\bimport\s*(?:type\s*)?\{[^}]*\b(?:${property}|${osFunction})\b[^}]*\}\s*from\s*["'](?:node:)?(?:process|os)["']`,
+    "gu",
+  );
 checkCounted(
   "ambient process.platform read (take HOST_PLATFORM from src/platform/HostPlatform at composition and pass the platform as a parameter)",
   "ambient-host-platform",
   files,
-  /\bprocess\.platform\b/gu,
+  ambientHostRead("platform", "platform"),
   ["src/platform/HostPlatform.ts"],
 );
 checkCounted(
   "ambient process.arch read (take HOST_PLATFORM from src/platform/HostPlatform at composition and pass the architecture as a parameter)",
   "ambient-host-architecture",
   files,
-  /\bprocess\.arch\b/gu,
+  ambientHostRead("arch", "arch"),
   ["src/platform/HostPlatform.ts"],
 );
 
@@ -663,28 +848,56 @@ const verifierScripts = await Promise.all(
       ),
     })),
 );
+// The Windows native lane tests PrivateRuntimeRoot itself: it calls
+// PrivateRuntimeRoot.create under a parent whose DELETE lease forces a sharing
+// violation and asserts the typed refusal. That call is the subject under
+// test, not a verifier root, so exactly one occurrence of that expression is
+// exempt; any other allocation in the file, including a second copy of it,
+// still counts.
+const verifierRootSubjectsUnderTest = new Map([
+  [
+    "scripts/verify-windows-native.mjs",
+    "PrivateRuntimeRoot.create({ parent: sharingParent.observation.path })",
+  ],
+]);
 checkCounted(
   "verifier fixture root allocated outside VerifierFixture (use scripts/lib/verifier-fixture.mjs)",
   "verifier-fixture-root",
-  verifierScripts,
+  verifierScripts.map((file) => {
+    const subject = verifierRootSubjectsUnderTest.get(file.path);
+    return subject === undefined
+      ? file
+      : { ...file, content: file.content.replace(subject, "") };
+  }),
   /\b(?:mkdtemp(?:Sync)?|createCanonicalTemporaryDirectory)\(|\bPrivateRuntimeRoot\.create\(/gu,
   [],
 );
 
-if (baselinesShrunk) {
-  const sorted = Object.fromEntries(
-    Object.entries(baselines).map(([key, counts]) => [
-      key,
-      Object.fromEntries(
-        Object.entries(counts).sort(([left], [right]) =>
-          left < right ? -1 : left > right ? 1 : 0,
-        ),
-      ),
-    ]),
+for (const key of baselineTexts.keys())
+  if (!checkedBaselineKeys.has(key))
+    failures.push(
+      `${relative(root, join(baselineDirectory, `${key}.json`))} names no counted guard; delete it or restore its guard.`,
+    );
+for (const key of checkedBaselineKeys) {
+  const path = join(baselineDirectory, `${key}.json`);
+  const shown = relative(root, path);
+  const baselineFile = reconcileBaselineFile(
+    baselineTexts.get(key),
+    baselines[key],
+    shrinkBaselines,
   );
-  await writeFile(baselinePath, `${JSON.stringify(sorted, null, 2)}\n`);
-  console.log(`Lowered counted baselines in ${relative(root, baselinePath)}.`);
+  if (baselineFile.action === "write") {
+    await writeFile(path, baselineFile.text);
+    console.log(`Rewrote ${shown}.`);
+  } else if (baselineFile.action === "delete") {
+    await rm(path);
+    console.log(`Removed ${shown}; its guard has no remaining copies.`);
+  } else if (baselineFile.action === "reject")
+    failures.push(
+      `${shown} is not in its written form (paths sorted by code unit); rewrite it with \`node scripts/verify/architecture-guards.mjs --shrink-baselines\`.`,
+    );
 }
+if (baselinesShrunk) console.log("Lowered counted baselines.");
 
 if (failures.length > 0) {
   console.error(`Architecture guards failed:\n\n${failures.join("\n\n")}\n`);
