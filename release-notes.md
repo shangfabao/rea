@@ -7,6 +7,8 @@
 
 ### ⚠ BREAKING CHANGES
 
+* **cli:** Markdown argument diagnostics use REA's literal escaping, table widths and token counts. Flag-shaped unknown MCP subcommands honor the selected format. Completion --schema/--version routes use the canonical REA-owned hook rather than the retired SDK generator. Refresh affected literal snapshots and regenerate completion hooks with rea completions <shell>.
+* **cli:** rea <command> --mcp is removed. Start REA's MCP server with rea mcp or rea --mcp.
 * **mcp:** MCP calls to inspect_pcap_capture, start_rizin_debug_session and start_gdb_session with a relative path or inferior_tty are refused with invalid_request. Pass absolute paths.
 * **frida:** MCP `load_frida_script` and `instrument_with_frida` refuse a relative script `path` with `invalid_request`; send an absolute path. CLI `--script-file` still accepts a relative path, and Evidence `source_path` is now the resolved absolute path.
 * **android:** Android JNI Evidence whose library failure has kind "integrity" must name integrity_check. Records written before #11191 that lack it no longer parse; recreate them.
@@ -73,6 +75,7 @@
 * **evidence:** require firmware budgets and managed row resolution that producers always write ([#11334](https://github.com/shangfabao/rea/issues/11334)) ([6bc74fb](https://github.com/shangfabao/rea/commit/6bc74fbc40012fb04c03130b42e43530be385945))
 * **evidence:** require JavaScript, browser, managed and reference-source facts their producers always write ([#10990](https://github.com/shangfabao/rea/issues/10990)) ([15de1d4](https://github.com/shangfabao/rea/commit/15de1d4dce9d94ec71924004c0c38782069c8479))
 * **flutter:** carry the value of each fixed Flutter allowance ([#11641](https://github.com/shangfabao/rea/issues/11641)) ([2a31e06](https://github.com/shangfabao/rea/commit/2a31e064f35e53b40915cfc3ee3d698295d93715))
+* **gdb:** bind sessions to an optional executable ([230db70](https://github.com/shangfabao/rea/commit/230db70fb473dd15928ae6c1a885f7e8a5507dae))
 * **gdb:** name why close requires an explicit inferior disposition ([#11652](https://github.com/shangfabao/rea/issues/11652)) ([162097b](https://github.com/shangfabao/rea/commit/162097b95add4a14110e32b1d55010c354c2ac82))
 * **ida:** require an explicit protocol for attached IDA registrations ([#10846](https://github.com/shangfabao/rea/issues/10846)) ([8428de1](https://github.com/shangfabao/rea/commit/8428de13d3e9b2faadfeac8bca0e60eb28d7b674))
 * **javascript:** make the member-mutation work allowance a runtime setting ([#11181](https://github.com/shangfabao/rea/issues/11181)) ([0f53849](https://github.com/shangfabao/rea/commit/0f53849160d48026d885aa90948020eeaaa867f1))
@@ -151,6 +154,9 @@
 * **captures:** retain preparation cleanup owners ([#10288](https://github.com/shangfabao/rea/issues/10288)) ([9c86465](https://github.com/shangfabao/rea/commit/9c86465d47e98306e1ee1f77e7fb25d1d737b1db))
 * **captures:** retain wide native numeric exclusions ([#10343](https://github.com/shangfabao/rea/issues/10343)) ([fd3e613](https://github.com/shangfabao/rea/commit/fd3e613d23795f693e9231102249390228cab35f))
 * **ci:** defer proposals for merged release commits ([5eef239](https://github.com/shangfabao/rea/commit/5eef239dfd774331d622aaa4762f42fa632121ab))
+* **ci:** repair Python catalog test and deep static check failures ([8ffea11](https://github.com/shangfabao/rea/commit/8ffea11ee30d5e0d442a8d14b27e05b0441b9e18))
+* **ci:** repair shared progress, cleanup and verifier failures ([#11727](https://github.com/shangfabao/rea/issues/11727)) ([552d1c7](https://github.com/shangfabao/rea/commit/552d1c7108b99d1c9ec15d8b629ae07dc56d4714))
+* **ci:** satisfy typed switch exhaustiveness checks ([3676ec6](https://github.com/shangfabao/rea/commit/3676ec632bfbe4fde2f5303daa0d9261072ce04a))
 * **ci:** select debugger command handlers through the command registry ([#11686](https://github.com/shangfabao/rea/issues/11686)) ([4c8e616](https://github.com/shangfabao/rea/commit/4c8e616029ed7b45adb5fdfcaf0148dd011a40e0)), closes [#11654](https://github.com/shangfabao/rea/issues/11654)
 * **ci:** settle cancelled test-group descendants ([#10229](https://github.com/shangfabao/rea/issues/10229)) ([070cfce](https://github.com/shangfabao/rea/commit/070cfce443f803c22f9b958c2f6e85a23b288241))
 * **cli:** advertise parsed JSON documents in --schema ([d734e64](https://github.com/shangfabao/rea/commit/d734e6424df5fed42399dc22b759a1c9962c01f2))
@@ -437,9 +443,12 @@
 * **cli:** bind command argv with REA's own parser ([#11681](https://github.com/shangfabao/rea/issues/11681)) ([dbdbda3](https://github.com/shangfabao/rea/commit/dbdbda3d07ef736cda1a2ea63c286dddf31d107d))
 * **cli:** bind web capture caller paths through the CLI delivery owner ([#11322](https://github.com/shangfabao/rea/issues/11322)) ([5c5c87d](https://github.com/shangfabao/rea/commit/5c5c87d0fecd83ea181d6992fa4c33829f55fa0f))
 * **cli:** declare CLI schema facts through the typed constraint helpers ([#11205](https://github.com/shangfabao/rea/issues/11205)) ([6cbfb9f](https://github.com/shangfabao/rea/commit/6cbfb9f6dcaf03381686cee6d9fe3fc8e8ba3935))
+* **cli:** derive build catalogs from the REA command registry ([4ea24b6](https://github.com/shangfabao/rea/commit/4ea24b6f8e63081ec5077c8e88370a8632aeeb0c))
 * **cli:** derive contract-backed command options from the tool contract ([#10571](https://github.com/shangfabao/rea/issues/10571)) ([f3b697d](https://github.com/shangfabao/rea/commit/f3b697da5a698a5548afd3b19d044ec623bdda0b))
+* **cli:** dispatch commands through REA-owned execution ([62014b5](https://github.com/shangfabao/rea/commit/62014b566d79c563933e32182c4e7515fd9a54e2))
 * **cli:** import zod directly instead of through incur ([#11655](https://github.com/shangfabao/rea/issues/11655)) ([07c5a54](https://github.com/shangfabao/rea/commit/07c5a54feee8de5ed5079fdebbdd122fa70d108a))
 * **cli:** name a failure's per-call control flag at the CLI boundary ([#11413](https://github.com/shangfabao/rea/issues/11413)) ([49d4991](https://github.com/shangfabao/rea/commit/49d4991a18b6c6385aa4e993b3bf40249cee7dce))
+* **cli:** own builtin refusals and retire per-command MCP ([7d502dd](https://github.com/shangfabao/rea/commit/7d502ddb0d8d80d0e16a80b0edc813f704e3ac31))
 * **cli:** own shell completion behind new CLI parity goldens ([#11662](https://github.com/shangfabao/rea/issues/11662)) ([f39e5e8](https://github.com/shangfabao/rea/commit/f39e5e80db20568f92c3d8e6f40f7f61802be226))
 * **cli:** project core native commands with open_binary target options ([#10736](https://github.com/shangfabao/rea/issues/10736)) ([4eafd9d](https://github.com/shangfabao/rea/commit/4eafd9dee517d9a660705426adfda5b87295e78b))
 * **cli:** project Go, V8 and delivery inspectors from their contracts ([#10576](https://github.com/shangfabao/rea/issues/10576)) ([da53dce](https://github.com/shangfabao/rea/commit/da53dce1f729d33abe0d269061412af7662f2a09))
@@ -452,6 +461,7 @@
 * **cli:** read global arguments once with one REA owner ([#11687](https://github.com/shangfabao/rea/issues/11687)) ([5257a3d](https://github.com/shangfabao/rea/commit/5257a3d91278387d832aed41c96b8896c2313a46))
 * **cli:** register every command in an REA-owned command table ([#11680](https://github.com/shangfabao/rea/issues/11680)) ([f14e9a1](https://github.com/shangfabao/rea/commit/f14e9a1d282a7155c32f260730f5881d2c3e6c83))
 * **cli:** render command help with REA's own help owner ([#11683](https://github.com/shangfabao/rea/issues/11683)) ([ec1cf3a](https://github.com/shangfabao/rea/commit/ec1cf3a9bd193371a599ae69b1bc6325b4624b14))
+* **cli:** report unknown commands and the update notice from REA ([#11692](https://github.com/shangfabao/rea/issues/11692)) ([a10037e](https://github.com/shangfabao/rea/commit/a10037ef10516cf92653596512932b15f190a5c0))
 * **cli:** run one-shot commands through one shared owner ([#10405](https://github.com/shangfabao/rea/issues/10405)) ([bddbd80](https://github.com/shangfabao/rea/commit/bddbd80afb8e5e2c5b5d7a0f3906497b5be7e9b5))
 * **compression:** move the raw LZ4 block decoder into src/compression ([#11492](https://github.com/shangfabao/rea/issues/11492)) ([79abe4e](https://github.com/shangfabao/rea/commit/79abe4e5fa1b7bf39390411ed0940872675d9f9c))
 * **config:** move the MCP startup policy beside its startup budgets in src/config ([#11429](https://github.com/shangfabao/rea/issues/11429)) ([47c252f](https://github.com/shangfabao/rea/commit/47c252f5274607a02d750f817caaac7366a33ccb))
@@ -543,6 +553,7 @@
 * **mcp:** bind Android tools through the shared service binding table ([#11336](https://github.com/shangfabao/rea/issues/11336)) ([66ec6a7](https://github.com/shangfabao/rea/commit/66ec6a7261e6cab5125a83a007d480d54eae7d85))
 * **mcp:** bind artifact and bundle comparison through a derived binding that acquires under the artifact resource scope ([#11554](https://github.com/shangfabao/rea/issues/11554)) ([f6df353](https://github.com/shangfabao/rea/commit/f6df3530028488d85b0deefe3256aee0dbae2d5e))
 * **mcp:** bind close_binary and reset_investigation through the shared table ([#11647](https://github.com/shangfabao/rea/issues/11647)) ([b7fe131](https://github.com/shangfabao/rea/commit/b7fe131123b036fc99eb1da1fdfcccaaae130a7e))
+* **mcp:** bind Electron tools through shared contracts ([d6bcfc1](https://github.com/shangfabao/rea/commit/d6bcfc10eafa3c0893c7cbd5f3dc6a90359be022))
 * **mcp:** bind Frida discovery and session tools through the shared table ([#11621](https://github.com/shangfabao/rea/issues/11621)) ([093e41a](https://github.com/shangfabao/rea/commit/093e41a5684c719c48d647717b36c74923e3d190))
 * **mcp:** bind GDB and Cutter tools under external-mutation admission through the shared table ([#11637](https://github.com/shangfabao/rea/issues/11637)) ([e94ca9f](https://github.com/shangfabao/rea/commit/e94ca9f223d965ce040ee5ce66f496b1881ab9b2))
 * **mcp:** bind layout, browser scenario, runtime observation, guided workflow and native matching tools through the shared table ([#11646](https://github.com/shangfabao/rea/issues/11646)) ([465796a](https://github.com/shangfabao/rea/commit/465796af0f9bbd823d2e25659e3e52e205ab5e64))
