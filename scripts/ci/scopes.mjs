@@ -68,6 +68,7 @@ const PATH_SCOPES = {
     ...CAPTURE_SHARED_INPUTS,
     "scripts/verify-signal-recording.mjs",
     ".github/workflows/real-signal-recording.yml",
+    ".github/actions/ubuntu-archive/action.yml",
   ],
   readiness: [
     "tests/conformance/readiness/**",
@@ -677,12 +678,14 @@ const PATH_SCOPES = {
     "src/ghidra/GhidraJavaProperties.ts",
     "src/ghidra/GhidraReleasePolicy.ts",
     "scripts/verify-ghidra-bridge-sources.mjs",
+    "scripts/verify-ghidra-prototype-conflicts.mjs",
     "tests/conformance/ghidra/ReaInstructionContextProbe.java",
     "tests/conformance/ghidra/ReaComputedCallCoverageProbe.java",
     "tests/conformance/ghidra/ReaDecodeProbe.java",
     "scripts/verify-ghidra-loader-relocation.mjs",
     "tests/conformance/ghidra/ReaLoaderRelocationProbe.java",
     "tests/conformance/ghidra/loader-relocation*.c",
+    "tests/conformance/ghidra/ReaPrototypeConflictProbe.java",
     ".github/workflows/ghidra-bridge-sources.yml",
   ],
   go_binary: [
@@ -713,6 +716,7 @@ const PATH_SCOPES = {
   website: [
     "website/**",
     "scripts/*website*.py",
+    "scripts/read-authored-skill-manifest.mjs",
     "README*.md",
     "docs/readme/README*.md",
     ".github/workflows/website-check.yml",
@@ -789,7 +793,17 @@ export const CI_LANES = {
     { testInputs: true },
   ),
   website: sameJobs(PATH_SCOPES.website, ["website"], {
-    earlyInputs: [".agents/skills/reverse-engineer-anything/**"],
+    earlyInputs: [
+      ".agents/skills/reverse-engineer-anything/**",
+      "scripts/lib/verifier-source-loader.mjs",
+      "src/domain/skillManifest.ts",
+      "src/domain/result.ts",
+      "src/domain/strictUtf8.ts",
+      "package.json",
+      "package-lock.json",
+      ".nvmrc",
+      ".npmrc",
+    ],
   }),
 };
 // An input owner omitted from the registry must never silently lose a lane.
