@@ -36,6 +36,49 @@ const scopeFlags = async () =>
       ),
     ).CI_FLAGS;
 
+it("opts only the Noble binary-layout toolchain into the Ubuntu Azure archive fallback", async () => {
+  const archive = "./.github/actions/ubuntu-archive";
+  const input = "noble-azure-fallback";
+  const steps = z.array(
+    z.object({
+      uses: z.string().optional(),
+      with: z.record(z.string(), z.unknown()).optional(),
+    }),
+  );
+  const action = async (name: string) =>
+    parse(
+      await readFile(
+        new URL(`../../../.github/actions/${name}/action.yml`, import.meta.url),
+        "utf8",
+      ),
+    );
+  const layout = (await workflow("real-binary-layout.yml")).jobs[
+    "real-binary-layout"
+  ];
+  expect(layout?.["runs-on"]).toBe("ubuntu-24.04");
+  expect(
+    steps.parse(layout?.steps).filter((step) => step.uses === archive),
+  ).toEqual([{ uses: archive, with: { [input]: "true" } }]);
+  expect(
+    z
+      .object({ runs: z.object({ steps }) })
+      .parse(await action("windows-cross-compiler"))
+      .runs.steps.filter((step) => step.uses === archive),
+  ).toEqual([{ uses: archive }]);
+  expect(
+    steps
+      .parse((await workflow("real-signal-recording.yml")).jobs.sigrok?.steps)
+      .filter((step) => step.uses === archive),
+  ).toEqual([{ uses: archive }]);
+  expect(
+    z
+      .object({
+        inputs: z.record(z.string(), z.object({ default: z.string() })),
+      })
+      .parse(await action("ubuntu-archive")).inputs[input]?.default,
+  ).toBe("false");
+});
+
 const recordedCrashRefresh = "refresh --kill-after=5s 90s";
 const recordedCrashDownload = "download --kill-after=5s 180s";
 
@@ -1116,3 +1159,63 @@ it("requires every client schema engine in the build job of every code change", 
   );
   expect(check?.run).toContain("$SCHEMA_CHECK_OPTIONS");
 });
+
+it.skipIf(process.platform === "win32").each([
+  ["true", "180", "0"],
+  ["false", "120", "0"],
+  ["false", "120", "124"],
+] as const)(
+  "downloads hosted packages within the selected deadline and keeps cached install outside it (%s, %s, %s)",
+  async (recommends, seconds, status) => {
+    const { run } = z
+      .object({
+        runs: z.object({ steps: z.tuple([z.object({ run: z.string() })]) }),
+      })
+      .parse(
+        parse(
+          await readFile(
+            new URL(
+              "../../../.github/actions/host-apt-packages/action.yml",
+              import.meta.url,
+            ),
+            "utf8",
+          ),
+        ),
+      ).runs.steps[0];
+    const result = await executeWorkflowFixture("bash", [
+      "-e",
+      "-c",
+      `
+        REA_APT_INSTALL_RECOMMENDS=$1
+        REA_APT_DOWNLOAD_TIMEOUT=$2
+        REA_APT_PACKAGES="package-one package-two"
+        fixture_status=$3
+        sudo() {
+          printf '%s\n' "$*"
+          if [[ $1 == timeout ]]; then return "$fixture_status"; fi
+        }
+      ` +
+        "\n" +
+        run,
+      "fixture",
+      recommends,
+      seconds,
+      status,
+    ]).then(
+      ({ stdout }) => ({ code: 0, stdout }),
+      (cause: unknown) =>
+        z.object({ code: z.number(), stdout: z.string() }).parse(cause),
+    );
+    const install = `install --yes${recommends === "false" ? " --no-install-recommends" : ""} -- package-one package-two`;
+    const commands = result.stdout
+      .trim()
+      .split("\n")
+      .filter((line) => !line.startsWith("::error::"));
+    expect(result.code).toBe(Number(status));
+    expect(commands).toEqual([
+      `timeout --kill-after=5s ${seconds}s apt-get -o Acquire::Retries=2 --download-only ${install}`,
+      ...(status === "0" ? [`apt-get --no-download ${install}`] : []),
+    ]);
+    if (status !== "0") expect(result.stdout).toContain(`(exit ${status})`);
+  },
+);

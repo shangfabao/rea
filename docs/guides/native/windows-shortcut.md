@@ -61,7 +61,9 @@ birth-droid GUIDs. Version-1 UUID MAC and timestamp values are labelled
 `evidence_kind: "derived"`. `KnownFolderDataBlock` and `SpecialFolderDataBlock`
 keep their folder identifiers. `ConsoleFEDataBlock` keeps the code page.
 `PropertyStoreDataBlock` and unrecognized signatures stay raw with SHA-256.
-Unknown signatures are listed and are not dropped.
+Unknown signatures are listed and are not dropped. Decoded fixed-size blocks
+with a mismatched length are retained as raw payload hashes and reported as
+partial. Later blocks remain readable at their declared offsets.
 When `HasExpString`, `HasDarwinID`, `HasExpIcon`, or `RunWithShimLayer`
 declares a block, the terminal record lets REA report a missing block and mark
 coverage partial. If parsing stops before the terminal, an unseen block remains
@@ -108,7 +110,9 @@ partial success. Truncation after a valid header, ExtraData size overruns, and
 odd Unicode lengths return partial coverage with `coverage.failing_offset`.
 A LinkInfo, VolumeID, or network-name string offset that points inside its
 structure header or outside its structure is reported at the offset field itself,
-so every issue offset lies inside the file.
+so every issue offset lies inside the file. A `LinkInfoHeaderSize` below 0x1C
+does not shrink the mandatory 28-byte header, so an offset in that header is
+still reported at the offset field and the path stays unreadable.
 Coverage is never `complete` when issues are present.
 A PropertyStoreDataBlock shorter than 12 bytes or a ShimDataBlock shorter than
 136 bytes makes coverage partial. The report retains the block's signature,

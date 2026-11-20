@@ -821,6 +821,59 @@ it("reports a VolumeID that selects a Unicode label it cannot hold", async () =>
 });
 
 it.each([
+  { kind: "environment" },
+  { kind: "icon_environment" },
+  { kind: "tracker" },
+  { kind: "console_fe" },
+  { kind: "special_folder" },
+  { kind: "known_folder" },
+] as const)(
+  "keeps oversized $kind ExtraData raw and reads the next block",
+  async (entry) => {
+    const valid = windowsShortcutBytes({
+      extraData: [entry, { kind: "unknown", signature: 0xa00000fe }],
+    });
+    const control = await parse(valid);
+    expect(control.coverage.status).toBe("complete");
+    const [first, next] = control.extra_data.blocks;
+    if (first === undefined || next === undefined)
+      throw new Error("Expected two blocks");
+    const tail = Buffer.from([0xab, 0xcd]);
+    const bytes = Buffer.concat([
+      valid.subarray(0, next.offset),
+      tail,
+      valid.subarray(next.offset),
+    ]);
+    bytes.writeUInt32LE(first.size + tail.length, first.offset);
+
+    const report = await parse(bytes);
+    expect(report.coverage).toMatchObject({
+      status: "partial",
+      failing_offset: first.offset,
+    });
+    expect(report.issues).toEqual([
+      expect.objectContaining({
+        code: "malformed_structure",
+        offset: first.offset,
+      }),
+    ]);
+    const payload = bytes.subarray(first.offset + 8, next.offset + tail.length);
+    expect(report.extra_data.blocks).toEqual([
+      {
+        ...first,
+        size: first.size + tail.length,
+        decoded: {
+          kind: "raw",
+          bytes: payload.length,
+          sha256: createHash("sha256").update(payload).digest("hex"),
+        },
+      },
+      { ...next, offset: next.offset + tail.length },
+    ]);
+  },
+);
+
+it.each([
   { field: 16, key: "local_base_path" },
   { field: 24, key: "common_path_suffix" },
   { field: 28, key: "local_base_path_unicode" },
@@ -853,6 +906,77 @@ it.each([
     );
   },
 );
+
+it.each([
+  { field: 16, key: "local_base_path" },
+  { field: 24, key: "common_path_suffix" },
+] as const)(
+  "treats a $key inside the mandatory header as unreadable when HeaderSize is below 0x1C",
+  async ({ field, key }) => {
+    const bytes = windowsShortcutBytes({
+      idList: null,
+      linkInfo: { localBasePath: "C:\\Apps\\safe.exe", commonPathSuffix: "" },
+      iconLocation: "C:\\Apps\\other.exe",
+      extraData: [],
+    });
+    const link = 76;
+    // HeaderSize 0x10 is below the mandatory 0x1C, and 0x14 still sits in that
+    // header. The bytes there would otherwise decode as the full path "C:\\x".
+    bytes.writeUInt32LE(0x10, link + 4);
+    bytes.writeUInt32LE(0x14, link + field);
+    bytes.write("C:\\x", link + 0x14, "latin1");
+    if (field !== 24) bytes.writeUInt32LE(0, link + 24);
+    const report = await parse(bytes);
+    expect(report.link_info?.header_size).toBe(0x10);
+    expect(report.link_info?.[key]).toBeNull();
+    expect(report.coverage.status).toBe("partial");
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "malformed_structure",
+        offset: link + field,
+      }),
+    );
+    expect(
+      report.observations.find(
+        ({ kind }) => kind === "icon_location_differs_from_target",
+      ),
+    ).toMatchObject({ value: null });
+    expect(
+      report.observations.find(({ kind }) => kind === "target_extension"),
+    ).toMatchObject({ extension: null });
+  },
+);
+
+it("reads a LinkInfo path that starts at the mandatory header when HeaderSize is below 0x1C", async () => {
+  const bytes = windowsShortcutBytes({
+    idList: null,
+    linkInfo: { localBasePath: "C:\\Apps\\safe.exe", commonPathSuffix: "" },
+    iconLocation: "C:\\ok.exe",
+    extraData: [],
+  });
+  const link = 76;
+  bytes.writeUInt32LE(0x10, link + 4);
+  bytes.writeUInt32LE(0, link + 12);
+  bytes.writeUInt32LE(0x1c, link + 16);
+  bytes.writeUInt32LE(0, link + 24);
+  bytes.write("C:\\ok.exe\0", link + 0x1c, "latin1");
+  const report = await parse(bytes);
+  expect(report.link_info?.local_base_path).toBe("C:\\ok.exe");
+  expect(report.issues).not.toContainEqual(
+    expect.objectContaining({
+      code: "malformed_structure",
+      offset: link + 16,
+    }),
+  );
+  expect(
+    report.observations.find(
+      ({ kind }) => kind === "icon_location_differs_from_target",
+    ),
+  ).toMatchObject({ value: false });
+  expect(
+    report.observations.find(({ kind }) => kind === "target_extension"),
+  ).toMatchObject({ extension: ".exe" });
+});
 
 it.each([
   {
@@ -1020,6 +1144,35 @@ it("marks an IDList without a TerminalID as partial", async () => {
     expect.objectContaining({
       code: "malformed_structure",
       offset: 78 + declared,
+    }),
+  );
+});
+
+it("reports bytes after an early TerminalID and preserves the next section", async () => {
+  const valid = windowsShortcutBytes({
+    idList: [{ kind: "volume", name: "C:" }],
+    name: "Example shortcut",
+  });
+  const size = valid.readUInt16LE(76);
+  const tailOffset = 78 + size;
+  const tail = Buffer.from([1, 2, 3]);
+  const bytes = Buffer.concat([
+    valid.subarray(0, tailOffset),
+    tail,
+    valid.subarray(tailOffset),
+  ]);
+  bytes.writeUInt16LE(size + tail.length, 76);
+  const report = await parse(bytes);
+  expect(report.id_list?.item_count).toBe(1);
+  expect(report.string_data.name?.value).toBe("Example shortcut");
+  expect(report.coverage).toMatchObject({
+    status: "partial",
+    failing_offset: tailOffset,
+  });
+  expect(report.issues).toContainEqual(
+    expect.objectContaining({
+      code: "malformed_structure",
+      offset: tailOffset,
     }),
   );
 });
