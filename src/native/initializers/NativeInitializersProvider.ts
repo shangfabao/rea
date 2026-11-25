@@ -14,6 +14,7 @@ import {
   ArtifactResourceScope,
 } from "../../resources/index.js";
 import {
+  hasElfMagic,
   BinaryFormatFailure,
   BinaryResourceFailure,
   binaryResourceCeiling,
@@ -32,7 +33,6 @@ import {
   type NativeInitializers,
   type NativeInitializerSlice,
 } from "../../domain/native/nativeInitializers.js";
-import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { err, ok } from "../../domain/result.js";
 import { NATIVE_INITIALIZERS_PROVIDER } from "../../domain/investigationProviders.js";
 import {
@@ -43,16 +43,8 @@ import { hasMachoMagic } from "../../domain/apple/machoContainer.js";
 import { requireSelectedNativeImage } from "../../domain/apple/machoSliceSelection.js";
 import { readElfInitializers } from "./ElfInitializers.js";
 import { readMachoInitializers } from "./MachoInitializers.js";
-import { errorMessage } from "../../kernel/errorMessage.js";
 
 const OPERATION = "inspect_native_initializers";
-
-const isElf = (bytes: Buffer): boolean =>
-  bytes.length >= 4 &&
-  bytes[0] === 0x7f &&
-  bytes[1] === 0x45 &&
-  bytes[2] === 0x4c &&
-  bytes[3] === 0x46;
 
 /** Portable ELF and Mach-O initializer reader over one stable regular file. */
 export class NativeInitializersProvider implements NativeInitializersPort {
@@ -133,7 +125,7 @@ const inspectSelected = async (
   page: { readonly offset: number; readonly limit: number },
   signal: AbortSignal | undefined,
 ): Promise<NativeInitializerInspection> => {
-  if (isElf(selected.bytes)) {
+  if (hasElfMagic(selected.bytes)) {
     if (selected.selection !== null)
       throw new BinaryFormatFailure(
         "malformed",
@@ -238,14 +230,6 @@ const nativeInitializersFailure = (
           );
         return undefined;
       },
-      unclassified: (failure) =>
-        new ProviderAdapterError(NATIVE_INITIALIZERS_PROVIDER.id, OPERATION, {
-          cause: failure,
-          diagnostics: {
-            path: input.path,
-            reason: errorMessage(failure),
-          },
-        }),
     }),
   );
   return projectStableArtifactFailure(
