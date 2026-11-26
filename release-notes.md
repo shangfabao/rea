@@ -2,11 +2,31 @@
 ---
 
 
-## [6.11.0](https://github.com/shangfabao/rea/compare/rea-agents-6.10.1...rea-agents-6.11.0) (2026-11-25)
+## [6.11.0](https://github.com/shangfabao/rea/compare/rea-agents-6.10.1...rea-agents-6.11.0) (2026-11-26)
 
 
 ### ⚠ BREAKING CHANGES
 
+* **limits:** Rust dependency-parser refusals report details.limit for the binding parameter instead of a fixed_ceiling allowance.
+* **limits:** apktool and assetutil output refusals report details.limit for producer_limits.output_bytes instead of a fixed_ceiling refusal.
+* **native:** Go and Rust structural refusals and the WebAssembly section refusal report details.limit instead of a fixed_ceiling refusal.
+* **limits:** register producer.output_bytes as the session default for bounded producer output ([#14648](https://github.com/shangfabao/rea/issues/14648))
+* **browser:** an observe_web_execution call that omits detail on an observation above the agent result budget now returns the retained summary. Pass detail: "complete" (--detail complete) for the previous shape.
+* **native:** the PE retained-text, exception-directory entry and resource metadata refusals report details.limit instead of a fixed_ceiling refusal.
+* **native:** export inventory and retained-text refusals report details.limit for max_entries or max_text_bytes instead of a fixed_ceiling refusal, and MAX_NATIVE_EXPORT_ROWS is renamed DEFAULT_NATIVE_EXPORT_ROWS.
+* **native:** a DWARF decompression refusal reports details.limit for max_decompressed_bytes instead of a fixed_ceiling refusal.
+* **limits:** omitted input budgets for inspect_sqlite_database, inspect_go_binary, inspect_rust_binary and inspect_nuget_nupkg now admit larger files. Callers relying on the old default refusal must pass the old value explicitly.
+* **native:** inspect_devicetree's decoded-representation refusal reports reported_limits.boundary "max_decoded_bytes" with details.limit, instead of "decoded_bytes".
+* **native:** inspect_devicetree's decoded-representation refusal reports reported_limits.boundary "max_decoded_bytes" with details.limit, instead of "decoded_bytes".
+* **limits:** the SQLite snapshot refusal reports details.limit for producer_limits.input_bytes, and the SQLite column and reply refusals carry a fixed_ceiling refusal in place of their authored remediation.
+* **limits:** per-call parameter refusals gain `details.refusal`, and their `remediation.action` wording changes to the generated form.
+* **trace:** PlaywrightTracePort.inspect takes the resolved limits, and trace archive and nesting refusals report details.limit instead of a fixed_ceiling refusal.
+* **native:** refusals at the structural budget report reported_limits.boundary "max_structure_bytes" instead of "structure".
+* **metadata:** NTFS and Maven report refusals report details.limit instead of a fixed_ceiling refusal, and parseMavenGradleMetadata and the inspect_ntfs_journal input contract gain the new controls.
+* **flutter:** Flutter size, inventory and candidate refusals report details.limit instead of a fixed_ceiling refusal, and the inspect_dart_aot abi selector admits labels up to 65,521 characters.
+* **artifacts:** artifactReaderLimitsSchema now requires deno, wxapkg and tar groups, so saved Evidence whose effective_limits predates them fails validation and must be re-inspected. A release-exposure refusal at max_file_bytes reports details.limit instead of a fixed_ceiling refusal.
+* **limits:** discovery output_window gains record_budget_reached, a page can return fewer than limit records, and discovery no longer refuses at the record or line budget.
+* **cli:** An over-budget CLI result without --evidence_output is now saved to REA's private retained-Evidence cache and reported as {summary, evidence_bundle, delivery} with delivery.retained cache-file, instead of writing nothing. Pass --no-retain, or set REA_CLI_RETAINED_EVIDENCE_BYTES=0, to write nothing as before.
 * **delivery:** When a failure's details.partial_observation does not fit delivery.agent_result_budget_bytes beside the failure's own facts and the caller omitted detail, MCP and the CLI deliver its summary record instead of the complete Evidence, with details.partial_observation_delivery naming where the complete record is. Pass detail complete (--detail complete) for it inline.
 * **views:** xrefs and inspect_nuget_nupkg with detail omitted now return their retained summary when complete Evidence exceeds delivery.agent_result_budget_bytes in a session that can page it. Pass detail "complete" (CLI --detail complete) for complete inline delivery.
 * **delivery:** An omitted detail no longer always returns complete Evidence inline on MCP or the CLI for tools with a detail selector (including inspect_managed_members, inspect_managed_artifact, inspect_byte_entropy, inspect_artifact, analyze_javascript_application, list_procedures, list_strings and the other operations listed in src/domain/agentBudgetOperations.ts). Over the budget they return the retained summary; pass detail complete (--detail complete) for complete inline delivery. inspect_managed_members type_names narrows member_refs and exported_types.
@@ -57,6 +77,7 @@
 * **analysis-view:** count distinct retained JavaScript fact values ([e19dbcf](https://github.com/shangfabao/rea/commit/e19dbcf857e98f402b61b1ef793dd62d9929426a))
 * **analysis-view:** filter native exports and ELF dependencies by name prefix ([a148da5](https://github.com/shangfabao/rea/commit/a148da56ccfb370e7a638832c2a1290fb208ca63))
 * **analysis-view:** order inventory occurrences by size before paging ([386d294](https://github.com/shangfabao/rea/commit/386d294f90d1ebfc0d6d01374ead49fc5bc637e0))
+* **analysis-view:** page retained observe_web_execution observations ([38536f9](https://github.com/shangfabao/rea/commit/38536f9fdb8a66ff44375b888c8fabe1a4bff3ba))
 * **analysis-view:** page retained UEFI extraction manifests ([5e8388a](https://github.com/shangfabao/rea/commit/5e8388a655e2eae83c31e6e21a611c2fc9910156))
 * **analysis-view:** page retained UEFI firmware maps ([fc4c453](https://github.com/shangfabao/rea/commit/fc4c453683213991d2338b25c6752f24236a3052))
 * **analysis-view:** select inventory occurrences by artifact kind ([e128a69](https://github.com/shangfabao/rea/commit/e128a69c2fd2bd51125eb36d479d7e573d07267b))
@@ -64,15 +85,21 @@
 * **analysis-view:** select retained JavaScript facts by property value ([25e93a8](https://github.com/shangfabao/rea/commit/25e93a8139abf3ad398d0366d84c53c75fcd0d82))
 * **android:** add optional limit and offset paging to search_android_classes ([#13846](https://github.com/shangfabao/rea/issues/13846)) ([f47dbd9](https://github.com/shangfabao/rea/commit/f47dbd9351ac8624c409d4e37ea630c1cc35edd9))
 * **android:** pin jadx-headless-mcp 0.8.0 ([3ca89d8](https://github.com/shangfabao/rea/commit/3ca89d8272b3d8e49580ed261753ad6780df2839))
+* **artifacts:** back archive member counts with the artifact.member_count setting ([#14650](https://github.com/shangfabao/rea/issues/14650)) ([3129747](https://github.com/shangfabao/rea/commit/31297470ef829a404dc38c2acf327272e222c404))
+* **artifacts:** give Deno, wxapkg and tar readers artifact_limits controls ([#14620](https://github.com/shangfabao/rea/issues/14620)) ([3dae567](https://github.com/shangfabao/rea/commit/3dae567185ac08126d40ea38435d5cbe9aa64afe))
 * **artifacts:** inspect and compare directories by a content-addressed root digest ([#14270](https://github.com/shangfabao/rea/issues/14270)) ([56cf155](https://github.com/shangfabao/rea/commit/56cf15566ee1fee1cb0d3573bf0e23b1a682e635))
 * **artifacts:** inventory and extract ISO 9660 disc images offline ([#13290](https://github.com/shangfabao/rea/issues/13290)) ([e896f60](https://github.com/shangfabao/rea/commit/e896f60540f03e2c1fe0f916412bddd656c1f296))
 * **artifacts:** inventory and extract stored and gzip-compressed tar archives ([#14245](https://github.com/shangfabao/rea/issues/14245)) ([225a19a](https://github.com/shangfabao/rea/commit/225a19ae7a39d06d03a8d5df4d9bf44e645a6c54))
 * **artifacts:** report declared DDS, GLB, KTX and KTX2 headers and regions ([#14248](https://github.com/shangfabao/rea/issues/14248)) ([78d2593](https://github.com/shangfabao/rea/commit/78d2593a4543592636a49c0cead0ca64dcef78ea))
 * **browser:** accept mitmproxy 12.3.1 for native capture decode ([#8088](https://github.com/shangfabao/rea/issues/8088)) ([4f43d74](https://github.com/shangfabao/rea/commit/4f43d7422f5b4666a12570105ff5e25a6df7ec6c))
+* **browser:** accept retained capture references in compare_web_captures ([523d44f](https://github.com/shangfabao/rea/commit/523d44f6d8241b7283c8b1d6d63db3abe5475fab))
+* **browser:** budget observe_web_execution delivery ([42ce0ea](https://github.com/shangfabao/rea/commit/42ce0ea2310e310d07794955cc254e8ced3446b7))
 * **browser:** count credential-named members in HAR capture inspection ([#8708](https://github.com/shangfabao/rea/issues/8708)) ([3c7ea1c](https://github.com/shangfabao/rea/commit/3c7ea1ce850c20c067add363ffcddbc1d48f2aac))
+* **browser:** resolve retained capture references before comparison ([37b9942](https://github.com/shangfabao/rea/commit/37b99422be482c976d5249e1af2d57efcdbb58c9))
 * **browser:** size inspect_web_page delivery and page captures by section ([#14368](https://github.com/shangfabao/rea/issues/14368)) ([67a1e2c](https://github.com/shangfabao/rea/commit/67a1e2c9371131a93fb1eecb00d74bb160c6d215))
 * **cli:** add human-TTY failure rendering with CLI-only issue hint ([#14355](https://github.com/shangfabao/rea/issues/14355)) ([64279ef](https://github.com/shangfabao/rea/commit/64279efb5a01fc768d66033bd69a41a647c3e175))
 * **cli:** add list-procedures to produce function-matching inventories ([#14241](https://github.com/shangfabao/rea/issues/14241)) ([e2c0071](https://github.com/shangfabao/rea/commit/e2c00712fd421fc77f335d7b9f87ce162808a437))
+* **cli:** keep over-budget CLI results recoverable by default ([#14610](https://github.com/shangfabao/rea/issues/14610)) ([2bb554e](https://github.com/shangfabao/rea/commit/2bb554e8b05b945b1bf6cfe7d25b9b1ca0b60e5c))
 * **config:** persist provider settings in a user config file ([#3023](https://github.com/shangfabao/rea/issues/3023)) ([8d6552e](https://github.com/shangfabao/rea/commit/8d6552e928704a6477edec3674a17c3ba2f4f4af))
 * **delivery:** bound default results by an agent result budget ([#14252](https://github.com/shangfabao/rea/issues/14252)) ([123b693](https://github.com/shangfabao/rea/commit/123b693f0877181115b8fd7ad800ecfd566f22c0))
 * **delivery:** budget the partial observation carried by failure results ([#14607](https://github.com/shangfabao/rea/issues/14607)) ([73d6092](https://github.com/shangfabao/rea/commit/73d6092687a201940d2d454feb69ed0ccf845bd5))
@@ -82,13 +109,23 @@
 * **errors:** add the TargetFailure model, its projection table and conformance registry ([#14247](https://github.com/shangfabao/rea/issues/14247)) ([40e9a3f](https://github.com/shangfabao/rea/commit/40e9a3f1a1769f3fbb24ca226aa853f42d78c42e))
 * **evidence:** find direct referrers by linked Evidence ID ([#11709](https://github.com/shangfabao/rea/issues/11709)) ([b57671c](https://github.com/shangfabao/rea/commit/b57671cb42ed16687d0b0ea8ff43d3643e045aef))
 * **evidence:** paginate retained evidence discovery summaries ([#9084](https://github.com/shangfabao/rea/issues/9084)) ([a16669a](https://github.com/shangfabao/rea/commit/a16669ab2adf8341b0261e9527bb26c98c1d7b21))
+* **flutter:** give Flutter APK admission per-call apk_limits ([#14623](https://github.com/shangfabao/rea/issues/14623)) ([49e2eca](https://github.com/shangfabao/rea/commit/49e2eca4f971bc154badfae47ac80c7edcf97018))
 * **frida:** add optional limit and offset paging to list_frida_processes ([#13854](https://github.com/shangfabao/rea/issues/13854)) ([9ec23ad](https://github.com/shangfabao/rea/commit/9ec23ad03bb6feef0ad208170652858eabcb3e4a))
 * **ghidra:** admit RISC-V ilp32f ELF with a derived calling convention ([#8401](https://github.com/shangfabao/rea/issues/8401)) ([d8aadcc](https://github.com/shangfabao/rea/commit/d8aadcc69bc65412e1e1545e25f23256f6ab5d8b))
 * **ghidra:** open M-profile raw images at a separate load base ([#7951](https://github.com/shangfabao/rea/issues/7951)) ([0b51ca0](https://github.com/shangfabao/rea/commit/0b51ca03de173fcf22059b5512647bc1461022df))
 * **ida:** support the official Hex-Rays IDA MCP headlessly ([#4813](https://github.com/shangfabao/rea/issues/4813)) ([6822ebe](https://github.com/shangfabao/rea/commit/6822ebe1f3a4caec007fcd046754d66317d3349f))
 * **javascript:** add semantic_analysis structure-only mode to analyze_javascript_application ([#14117](https://github.com/shangfabao/rea/issues/14117)) ([eccd18a](https://github.com/shangfabao/rea/commit/eccd18a2cc325bb97f66f23a4216dfcacd9e1bca))
 * **javascript:** inventory Expo Router require.context route keys ([#10624](https://github.com/shangfabao/rea/issues/10624)) ([7b6e816](https://github.com/shangfabao/rea/commit/7b6e816b0b61d24d1a3b79106481f29db676ea65))
+* **limits:** raise disk-backed admission defaults for large ordinary targets ([#14653](https://github.com/shangfabao/rea/issues/14653)) ([30be941](https://github.com/shangfabao/rea/commit/30be941a5adb36211cf0449fc980292b4cb8a470))
+* **limits:** register producer.output_bytes as the session default for bounded producer output ([#14648](https://github.com/shangfabao/rea/issues/14648)) ([6ae722a](https://github.com/shangfabao/rea/commit/6ae722a660048e90c4cba36052134339250e16d0))
+* **limits:** report the value a per-call limit needs and derive its recovery ([#14625](https://github.com/shangfabao/rea/issues/14625)) ([78cb717](https://github.com/shangfabao/rea/commit/78cb7172a6d38f726fe00acd530a8a8b7c21a737))
 * **mcp:** link retained Evidence from over-budget summaries ([#14603](https://github.com/shangfabao/rea/issues/14603)) ([fa65e51](https://github.com/shangfabao/rea/commit/fa65e51a24dc4c2983840af8d2ec119c28687cf7))
+* **metadata:** give NTFS, Maven report and NuGet budgets typed per-call controls ([#14629](https://github.com/shangfabao/rea/issues/14629)) ([4f66985](https://github.com/shangfabao/rea/commit/4f6698597884d709be8a98ec43f9f5320ae598ce))
+* **native:** give inspect_dwarf_units a per-call max_decompressed_bytes ([#14660](https://github.com/shangfabao/rea/issues/14660)) ([1cc655b](https://github.com/shangfabao/rea/commit/1cc655bbc0c17c7138a6457d069578fe93505d3a))
+* **native:** give inspect_native_exports per-call inventory, text and structure budgets ([#14658](https://github.com/shangfabao/rea/issues/14658)) ([4d3fa5a](https://github.com/shangfabao/rea/commit/4d3fa5a0802ea31c4dc1b2ad559562e63b8dd7a2))
+* **native:** give the Go and Rust readers max_structure_bytes and Rust max_wasm_sections ([#14661](https://github.com/shangfabao/rea/issues/14661)) ([4c9dca6](https://github.com/shangfabao/rea/commit/4c9dca63a0e8bc08030a703565f26e1df49a2c94))
+* **native:** give the native structural decoding allowance a per-call max_structure_bytes ([#14626](https://github.com/shangfabao/rea/issues/14626)) ([e540cbd](https://github.com/shangfabao/rea/commit/e540cbdafd8170701b07b4735f8a5da40e47e10e))
+* **native:** give the PE readers per-call text, entry and metadata budgets ([#14659](https://github.com/shangfabao/rea/issues/14659)) ([0aca049](https://github.com/shangfabao/rea/commit/0aca049128687828bddc32e8c4c0a39d7544c1ff))
 * **native:** report the stored RVA of PE exports ([bf8448c](https://github.com/shangfabao/rea/commit/bf8448cdfc90c4c077f03b877cf09ea150509092))
 * **native:** retain Apple bundle executable provenance ([b8995f8](https://github.com/shangfabao/rea/commit/b8995f81489dda3e7f8be61317f366b7fabd97c7))
 * **pe:** inspect x64 exception-directory function ranges ([#14254](https://github.com/shangfabao/rea/issues/14254)) ([a85859e](https://github.com/shangfabao/rea/commit/a85859e14790795f6d13000b173cb32c82c49813))
@@ -96,6 +133,7 @@
 * **setup:** discover project-scoped MCP registrations in doctor and … ([#7283](https://github.com/shangfabao/rea/issues/7283)) ([63c50ec](https://github.com/shangfabao/rea/commit/63c50ecfc0a849d3298c44b1ce06e2e759f1303c))
 * **tools:** add optional limit and offset paging to find_xrefs_to_name ([#13858](https://github.com/shangfabao/rea/issues/13858)) ([1d4fadc](https://github.com/shangfabao/rea/commit/1d4fadceb2720b2db9a2a0674e95385117238d81))
 * **tools:** add optional max_depth and max_nodes bounds to get_call_graph and trace_call_path ([#13828](https://github.com/shangfabao/rea/issues/13828)) ([d0560b1](https://github.com/shangfabao/rea/commit/d0560b1b88c3257b802b80ef4c36719c9734b996))
+* **trace:** give Playwright trace import per-call trace_limits ([#14628](https://github.com/shangfabao/rea/issues/14628)) ([98d83d0](https://github.com/shangfabao/rea/commit/98d83d07870f43a583f3fe8ff1d2d49d932c8f2e))
 * **uefi:** record the owning FFS file of extracted payloads ([465079c](https://github.com/shangfabao/rea/commit/465079cb41d9cb4a6aa992c6533b8e6d617db440))
 * **views:** page byte-entropy blocks and runs; budget xrefs and nupkg delivery ([#14599](https://github.com/shangfabao/rea/issues/14599)) ([f764105](https://github.com/shangfabao/rea/commit/f7641050c7336e93bcf56653e5a3946bf0f60af3))
 * **web:** deduplicate bundle findings across scripts by value and mechanism ([#11354](https://github.com/shangfabao/rea/issues/11354)) ([23970fc](https://github.com/shangfabao/rea/commit/23970fc63f1c6f41ee03539216c236f85ae15593))
@@ -124,6 +162,7 @@
 * **artifacts:** isolate embedded Node SEA and .NET bundle probe errors from outer native inventory ([#14357](https://github.com/shangfabao/rea/issues/14357)) ([a7f8ab8](https://github.com/shangfabao/rea/commit/a7f8ab89a0fa73067d9ebb5d3b9c42b1f57b555a))
 * **artifacts:** keep a ZIP inventory when one member uses an unsupported compression method ([#13026](https://github.com/shangfabao/rea/issues/13026)) ([f548a62](https://github.com/shangfabao/rea/commit/f548a62a4f0c6f98f9624f529d6998305139117d))
 * **artifacts:** keep directory growth probes out of delivered bytes ([#13467](https://github.com/shangfabao/rea/issues/13467)) ([a3e7ed6](https://github.com/shangfabao/rea/commit/a3e7ed6d3b1a557be5b7e3ec2b535239525c3217))
+* **artifacts:** omit required_value where reader limits know only a lower bound ([#14646](https://github.com/shangfabao/rea/issues/14646)) ([b41399d](https://github.com/shangfabao/rea/commit/b41399d8a61bb86586a2bfbd1b6fb11799ae325e))
 * **artifacts:** preserve DMG verification cancellation at the deadline ([#13616](https://github.com/shangfabao/rea/issues/13616)) ([f18de40](https://github.com/shangfabao/rea/commit/f18de40af62ab25948fa8c94e4ecaa61a52353aa))
 * **artifacts:** publish Node SEA metadata only after carrier validation ([#13411](https://github.com/shangfabao/rea/issues/13411)) ([120980c](https://github.com/shangfabao/rea/commit/120980cac0bc674584b8480187768cfd70972c08))
 * **artifacts:** recognize standalone formats and route them to their readers ([#14192](https://github.com/shangfabao/rea/issues/14192)) ([6904da4](https://github.com/shangfabao/rea/commit/6904da4927685a864f164badfff02582fd18a9a5))
@@ -203,6 +242,7 @@
 * **contracts/mcp:** collapse Evidence wire schemas, project type lists, preserve discover_tools guidance ([#13752](https://github.com/shangfabao/rea/issues/13752)) ([f6a83f1](https://github.com/shangfabao/rea/commit/f6a83f1fcf6a1fa95a69ade0b0176f19516015fd))
 * **cutter/ghidra:** fix Cutter DAG limit rejection, guard Ghidra x86-32 SEH scan, and cache referenced address lookups ([#13478](https://github.com/shangfabao/rea/issues/13478)) ([ccdc887](https://github.com/shangfabao/rea/commit/ccdc887dc1b640b151e1cd594201a5406d72b8a2))
 * **cyclonedx:** keep recorded tool references unique ([#13425](https://github.com/shangfabao/rea/issues/13425)) ([7db00e8](https://github.com/shangfabao/rea/commit/7db00e8fd6306b880a7f25e5418de5a475761485))
+* **decompile:** keep the functions directory identity on mounts that renumber after chmod ([#14324](https://github.com/shangfabao/rea/issues/14324)) ([217f498](https://github.com/shangfabao/rea/commit/217f498945f656cef207118d241f68a80de51d6c))
 * **delivery:** summarize by size only where the summary can be paged ([89919c8](https://github.com/shangfabao/rea/commit/89919c836d690e62b178880fd0c65e0303a33f3f))
 * **desktop:** anchor draft text checks through reflow ([#13708](https://github.com/shangfabao/rea/issues/13708)) ([7add65d](https://github.com/shangfabao/rea/commit/7add65ddec97017d7a7d7ba83057aeb9eb529e4d))
 * **desktop:** avoid suggesting edits from incomparable views ([#13596](https://github.com/shangfabao/rea/issues/13596)) ([7673ab0](https://github.com/shangfabao/rea/commit/7673ab03a6cb26f045adcffe803801ee71102cb1))
@@ -336,8 +376,14 @@
 * **javascript:** share widened reference-store propagation ([#12990](https://github.com/shangfabao/rea/issues/12990)) ([fba5e44](https://github.com/shangfabao/rea/commit/fba5e44bf5f393dcd6bd3269d88d7101f1586ff0))
 * **javascript:** track shared ESM HTTP agent mutations ([d500638](https://github.com/shangfabao/rea/commit/d500638d5d4b666cf0b255085ce4d75a29cbc35e))
 * **javascript:** verify Expo context getter ownership ([#13803](https://github.com/shangfabao/rea/issues/13803)) ([8c16d7d](https://github.com/shangfabao/rea/commit/8c16d7d18f71c0057240db4122c5df9a8b907a95))
+* **limits:** apply producer.output_bytes within each producer's maximum ([#14668](https://github.com/shangfabao/rea/issues/14668)) ([05e5c91](https://github.com/shangfabao/rea/commit/05e5c915263b766dfcdc03319723f2ca40d9b420))
+* **limits:** budget Rust dependency parser ceilings per call ([#14666](https://github.com/shangfabao/rea/issues/14666)) ([1557159](https://github.com/shangfabao/rea/commit/155715942e6d8f549bb240529b887e0f86457d2b))
+* **limits:** let apktool and assetutil take producer_limits.output_bytes and type Android and process capture refusals ([#14624](https://github.com/shangfabao/rea/issues/14624)) ([0eb19a3](https://github.com/shangfabao/rea/commit/0eb19a395ec42ed40b575663dc8a8b2defce0643))
 * **limits:** let inspect_pcap_capture take producer_limits for its snapshot and TShark output ([#14280](https://github.com/shangfabao/rea/issues/14280)) ([fd09e2b](https://github.com/shangfabao/rea/commit/fd09e2b9a1ca8e6730d3d030ae23d012c5dea6f9))
+* **limits:** let inspect_sqlite_database take producer_limits.input_bytes and type SQLite, Kuna and web-bundle refusals ([#14627](https://github.com/shangfabao/rea/issues/14627)) ([a5c71e8](https://github.com/shangfabao/rea/commit/a5c71e8c88e75b1c8906a47996dbe4b360bb65a0))
 * **limits:** make the IL2CPP pointer index adjustable and require owned refusal limits ([#14243](https://github.com/shangfabao/rea/issues/14243)) ([6ab595c](https://github.com/shangfabao/rea/commit/6ab595cfd6fc67f6bfe7313e39f736ed67f036a3))
+* **limits:** omit required_value when PE/native read budgets know only a lower bound ([#14645](https://github.com/shangfabao/rea/issues/14645)) ([49187f1](https://github.com/shangfabao/rea/commit/49187f1ab39288182447537558c41a90f1976c3b))
+* **limits:** report packet and signal producer budgets as details.limit and page discovery at its record budget ([#14621](https://github.com/shangfabao/rea/issues/14621)) ([33e4e07](https://github.com/shangfabao/rea/commit/33e4e07dd05f6968d106c6671ca9b38033b10f11))
 * **macho:** correct encryption range VM mapping ([#13918](https://github.com/shangfabao/rea/issues/13918)) ([0fb1d11](https://github.com/shangfabao/rea/commit/0fb1d112f699b5619607f564f95fe52f14b7b061))
 * **macho:** keep header reads inside declared slices ([#13913](https://github.com/shangfabao/rea/issues/13913)) ([1172d7e](https://github.com/shangfabao/rea/commit/1172d7ed7d3fc76e664d6ad79abc8e7fa44b2c97))
 * **macho:** preserve legacy bind stream bounds and target scope ([#13874](https://github.com/shangfabao/rea/issues/13874)) ([a8ccf8b](https://github.com/shangfabao/rea/commit/a8ccf8b5b883f5df3394c7753d7edc0caaffa524))
@@ -362,6 +408,8 @@
 * **native:** preserve Apple tool diagnostics across macOS versions ([a9d1031](https://github.com/shangfabao/rea/commit/a9d103167484234027415cf7816f4bd8335bf8a7))
 * **native:** preserve bundle provenance in partial reports ([9ffaca5](https://github.com/shangfabao/rea/commit/9ffaca54477d33c0f41f7042688b8e11f08d25b0))
 * **native:** refresh bundle provenance on reopen ([e35780d](https://github.com/shangfabao/rea/commit/e35780d042a9428c0a619ec42cf11794f5d7525c))
+* **native:** report details.limit for native reader per-call budgets ([#14622](https://github.com/shangfabao/rea/issues/14622)) ([50d13f9](https://github.com/shangfabao/rea/commit/50d13f9f08dd4f026f190b2ee27c885f95b6e0b5))
+* **native:** report details.limit for remaining native reader budgets and make BEAM table rows adjustable ([#14631](https://github.com/shangfabao/rea/issues/14631)) ([1badb6a](https://github.com/shangfabao/rea/commit/1badb6a8ae9d5a9696bc13091fa32485a0392183))
 * **native:** require dyld's __restrict section before reporting a restricted Mach-O ([#13024](https://github.com/shangfabao/rea/issues/13024)) ([7a11884](https://github.com/shangfabao/rea/commit/7a11884c0897062867e62c0c6d1079342ef8d861))
 * **native:** resolve name and import selectors through one owner ([#14250](https://github.com/shangfabao/rea/issues/14250)) ([cab39c6](https://github.com/shangfabao/rea/commit/cab39c640a50726d7766f202046a403ba8e72fff))
 * **native:** validate SHT_GNU_HASH bounds and fall back to DT_GNU_HASH ([#13713](https://github.com/shangfabao/rea/issues/13713)) ([e6b30f9](https://github.com/shangfabao/rea/commit/e6b30f945ec214e05ca13c36874e155737a6d4cb))
@@ -497,6 +545,7 @@
 * **browser:** single-pass CaptureJson parser and zero-allocation Playwright trace skipping ([#13427](https://github.com/shangfabao/rea/issues/13427)) ([275b574](https://github.com/shangfabao/rea/commit/275b5740f6c7b52db6556bd555d6e5acc2302982))
 * **browser:** wake the bundle worker on observed events ([#13225](https://github.com/shangfabao/rea/issues/13225)) ([60e0998](https://github.com/shangfabao/rea/commit/60e099848d3a78860cf8982b28ce88e3a469d52f))
 * **captures/io:** stream artifact hashes and preserve bounded export reads ([#13755](https://github.com/shangfabao/rea/issues/13755)) ([16c827a](https://github.com/shangfabao/rea/commit/16c827a25f0e29098d9625292580a6ee19656faa))
+* **ci:** check out only the cache retention inputs ([#14677](https://github.com/shangfabao/rea/issues/14677)) ([d0de596](https://github.com/shangfabao/rea/commit/d0de59653f198f93370ac088db75f67e2336caf7))
 * **ci:** check out only timing reporter inputs ([#14378](https://github.com/shangfabao/rea/issues/14378)) ([79efc75](https://github.com/shangfabao/rea/commit/79efc75a11dffc857792b6dfb12ac4f24d4412a8))
 * **ci:** check recent runs first for a trusted baseline ([#14403](https://github.com/shangfabao/rea/issues/14403)) ([af06970](https://github.com/shangfabao/rea/commit/af06970015088f6185e4e01a7e4cffb27695db1b))
 * **ci:** defer failure artifacts until main comparison is possible ([#14379](https://github.com/shangfabao/rea/issues/14379)) ([f145aca](https://github.com/shangfabao/rea/commit/f145aca28fca368669f1f1af11cb62e248ce58eb))
@@ -507,7 +556,9 @@
 * **ci:** narrow cache retention checkouts ([#14402](https://github.com/shangfabao/rea/issues/14402)) ([8e4c1c5](https://github.com/shangfabao/rea/commit/8e4c1c5f8d7e38a68f180738d8335f1eacb10c18))
 * **ci:** narrow pull request classifier checkouts to traced inputs ([#14376](https://github.com/shangfabao/rea/issues/14376)) ([5ef6cd8](https://github.com/shangfabao/rea/commit/5ef6cd89b5b8cc192683c2e97762bb4c4422fb21))
 * **ci:** omit development tools from failure reporting ([#14332](https://github.com/shangfabao/rea/issues/14332)) ([30fe9d9](https://github.com/shangfabao/rea/commit/30fe9d9f424447926ca0b8fb3006ddd6f95f279b))
+* **ci:** omit unused PR associations from timing queries ([#14636](https://github.com/shangfabao/rea/issues/14636)) ([43117a8](https://github.com/shangfabao/rea/commit/43117a8ae074be6aaddf0f06ea16f562caad4d25))
 * **ci:** query static diagnostics by artifact name ([#14476](https://github.com/shangfabao/rea/issues/14476)) ([02c4209](https://github.com/shangfabao/rea/commit/02c420939d63a5c983e98815c518dc5d59a379bb))
+* **ci:** resolve small pinned test batches directly ([#14638](https://github.com/shangfabao/rea/issues/14638)) ([fb1b4c0](https://github.com/shangfabao/rea/commit/fb1b4c0fbb4a7bfcc0112fe68d59782c610b9f61))
 * **ci:** resolve test snapshot blobs in one tree walk ([#14334](https://github.com/shangfabao/rea/issues/14334)) ([73c1689](https://github.com/shangfabao/rea/commit/73c1689aefeabd29d235f8d4341d71f1d3316544))
 * **ci:** reuse collected job lists for failure reports ([#14537](https://github.com/shangfabao/rea/issues/14537)) ([f148353](https://github.com/shangfabao/rea/commit/f148353ff1737619b8bfa4f4a72430339ecb7d6f))
 * **ci:** reuse installed website rendering packages ([#14337](https://github.com/shangfabao/rea/issues/14337)) ([1e1db9e](https://github.com/shangfabao/rea/commit/1e1db9e342ad13d26c27f34af8a2d7a5648387c9))
@@ -773,6 +824,8 @@
 * **binary:** share prefix-aware byte slice reads ([#14377](https://github.com/shangfabao/rea/issues/14377)) ([6582830](https://github.com/shangfabao/rea/commit/658283000a0e5973650261ed45e9c3f0a32d8e22))
 * **build:** share skill file enumeration across generators ([#14339](https://github.com/shangfabao/rea/issues/14339)) ([73f72c9](https://github.com/shangfabao/rea/commit/73f72c9cd69ad5a669dd4fc705d4b45af4297f11))
 * centralize owned finalization and configuration failures ([#14071](https://github.com/shangfabao/rea/issues/14071)) ([4bbaf17](https://github.com/shangfabao/rea/commit/4bbaf175121f101b319cd8aa0b4d47d3f40d5862))
+* **ci:** share completeness guard grouping transitions ([#14637](https://github.com/shangfabao/rea/issues/14637)) ([0f358c2](https://github.com/shangfabao/rea/commit/0f358c2c97cfa80db35d563fdb53c1f270982771))
+* **ci:** share repository identifier validation ([#14678](https://github.com/shangfabao/rea/issues/14678)) ([9ca9654](https://github.com/shangfabao/rea/commit/9ca96545000614067c158ad32e39be5cf9fa0509))
 * **cli/server:** break remaining module-layer cycles ([#14013](https://github.com/shangfabao/rea/issues/14013)) ([b565f78](https://github.com/shangfabao/rea/commit/b565f787cb4642a277f85d1a299acb8c49d7b409))
 * **cli:** derive command names from their declaring contracts ([#14325](https://github.com/shangfabao/rea/issues/14325)) ([a27751b](https://github.com/shangfabao/rea/commit/a27751b41d9cfa0e1a2fa52c0eef9646447fa1ad))
 * **cli:** extract contractCliDescriptionTypes from contractCliDescription ([#13729](https://github.com/shangfabao/rea/issues/13729)) ([f3ff526](https://github.com/shangfabao/rea/commit/f3ff526f28f3da36b5236e89d4350f5f2e7a7d9b))
@@ -808,6 +861,7 @@
 * **domain:** share record and graph parsing across input paths ([#14321](https://github.com/shangfabao/rea/issues/14321)) ([2add88a](https://github.com/shangfabao/rea/commit/2add88a014e1bb16b53584615ea142067f55f916))
 * **domain:** split artifactFormatMetadata into domain modules ([#13655](https://github.com/shangfabao/rea/issues/13655)) ([8497f8c](https://github.com/shangfabao/rea/commit/8497f8c05a0a8184089f958419735329287bb9a0))
 * **domain:** split artifactFormatMetadata.ts into domain-grouped schema modules ([8497f8c](https://github.com/shangfabao/rea/commit/8497f8c05a0a8184089f958419735329287bb9a0))
+* **domain:** use known coverage in web bundle reports ([#14643](https://github.com/shangfabao/rea/issues/14643)) ([5f68d8d](https://github.com/shangfabao/rea/commit/5f68d8daf63fd00ceeaad6fbee8c22a8aef095a0))
 * **dwarf:** prune superseded whole-buffer locateDwarfSections wrapper ([#13993](https://github.com/shangfabao/rea/issues/13993)) ([27eef47](https://github.com/shangfabao/rea/commit/27eef4712206affa51850b1254d05d59eefbdd19))
 * **elf:** consolidate fixed record decoding proofs ([#13753](https://github.com/shangfabao/rea/issues/13753)) ([d0b562c](https://github.com/shangfabao/rea/commit/d0b562c682ace93cc22068b374c4a3bf427a248a))
 * **elf:** consolidate kernel module checks on positional reads ([be32625](https://github.com/shangfabao/rea/commit/be32625b29101fc6b482a38798a6ef22e68f9e94))
@@ -819,6 +873,7 @@
 * **elf:** retire the obsolete unwind buffer parser ([#14007](https://github.com/shangfabao/rea/issues/14007)) ([5acdeb7](https://github.com/shangfabao/rea/commit/5acdeb79fb4d5bedbf83d9a63f324cf7599bd0aa))
 * **elf:** retire the test-only dependency buffer driver ([0f4c4a7](https://github.com/shangfabao/rea/commit/0f4c4a7fb4c8d0f9da0ae896f43488d470b69bff))
 * **elf:** share magic and declared section range checks ([#14429](https://github.com/shangfabao/rea/issues/14429)) ([e71f097](https://github.com/shangfabao/rea/commit/e71f09742c0e1a83f7b912f084709fa17c4b43b8))
+* **elf:** share note reader limit error projection ([#14644](https://github.com/shangfabao/rea/issues/14644)) ([9edc95c](https://github.com/shangfabao/rea/commit/9edc95c512579dba488dcf98e71a38cd7fa05d7d))
 * **elf:** share the asynchronous build-id note reader ([#14509](https://github.com/shangfabao/rea/issues/14509)) ([5330585](https://github.com/shangfabao/rea/commit/53305850d7d5d205c40b46e8950aedc57c69f854))
 * **environment:** derive recorded paging names from their roles ([#14522](https://github.com/shangfabao/rea/issues/14522)) ([c080945](https://github.com/shangfabao/rea/commit/c080945a9976cf4b81081c382d0d27308fd03b52))
 * **environment:** derive the package source in the bundle plan ([#14485](https://github.com/shangfabao/rea/issues/14485)) ([f9ee091](https://github.com/shangfabao/rea/commit/f9ee091df2b05486714899067b7b620f0df32785))
@@ -854,6 +909,8 @@
 * **kuna:** extract KunaInventoryIndex from KunaSessionClient ([#13821](https://github.com/shangfabao/rea/issues/13821)) ([a022067](https://github.com/shangfabao/rea/commit/a02206755e8733f0bda5918707c60100bd0beeaa))
 * **kuna:** extract KunaSessionEvidence from KunaSessionClient ([#13879](https://github.com/shangfabao/rea/issues/13879)) ([12c50f1](https://github.com/shangfabao/rea/commit/12c50f1309b7ab75a5c70075a7c5078ac888e5af))
 * **kuna:** extract KunaSingleFunctionCache from KunaSessionClient ([#13863](https://github.com/shangfabao/rea/issues/13863)) ([135c136](https://github.com/shangfabao/rea/commit/135c136701c54a830264ac1a24aa2e37185faa3d)), refs [#13862](https://github.com/shangfabao/rea/issues/13862)
+* **limits:** derive help from resolved per-call defaults ([#14642](https://github.com/shangfabao/rea/issues/14642)) ([0e7db4c](https://github.com/shangfabao/rea/commit/0e7db4c0527ad5fc4a8b75fc03389129df52ef1c))
+* **limits:** share typed budget projections ([#14673](https://github.com/shangfabao/rea/issues/14673)) ([d112acc](https://github.com/shangfabao/rea/commit/d112acc2c65c45440cd6e7803f832d0151a01dc0))
 * **lint:** share counted findings reporting ([#14558](https://github.com/shangfabao/rea/issues/14558)) ([2f5dc7b](https://github.com/shangfabao/rea/commit/2f5dc7b27c08a06843a65a4ce7c4c525e8442c51))
 * **macho:** read LC_BUILD_VERSION fields through BinaryReader ([a0d2357](https://github.com/shangfabao/rea/commit/a0d2357230bdce24510436ee405d263fceb47870)), refs [#11865](https://github.com/shangfabao/rea/issues/11865)
 * **macho:** use binary facts for native diagnostic admission ([#13929](https://github.com/shangfabao/rea/issues/13929)) ([7ce3e5d](https://github.com/shangfabao/rea/commit/7ce3e5d208fe213882de9427835b993a9a36945c))
@@ -861,6 +918,7 @@
 * **managed:** share method and field graph registration ([#14471](https://github.com/shangfabao/rea/issues/14471)) ([9ea3af4](https://github.com/shangfabao/rea/commit/9ea3af4bb8554c8141ae7af2f4fc454a64001d2c))
 * **managed:** share unmatched member comparison facts ([#14484](https://github.com/shangfabao/rea/issues/14484)) ([cca35e9](https://github.com/shangfabao/rea/commit/cca35e94f74cf3f2210c11b8228fc55312d72ee8))
 * **manifest:** share ordered sibling group traversal ([#14571](https://github.com/shangfabao/rea/issues/14571)) ([0dd8789](https://github.com/shangfabao/rea/commit/0dd878946a29c7fb0dff0964235e53522600304b))
+* **mcp:** share retained evidence link eligibility ([#14639](https://github.com/shangfabao/rea/issues/14639)) ([d436d42](https://github.com/shangfabao/rea/commit/d436d42781220c3e86fbfb944e153ef490c6fd81))
 * **mobile:** share application inventory coverage and bridge projection ([#14527](https://github.com/shangfabao/rea/issues/14527)) ([8337fdf](https://github.com/shangfabao/rea/commit/8337fdf26ccf7059a7d2fa690ec532c0bd480ece))
 * **native:** compose LLDB resolver cleanup through the shared owner ([3af56cc](https://github.com/shangfabao/rea/commit/3af56cc7d50a5f41ea4753d2d0570082611ee0a4)), refs [#11859](https://github.com/shangfabao/rea/issues/11859)
 * **native:** extract NativeAotPeImage from nativeAotPe ([#13998](https://github.com/shangfabao/rea/issues/13998)) ([4d5b059](https://github.com/shangfabao/rea/commit/4d5b059c640aa5b690116bdffefba4085a1c3ebd))
@@ -932,6 +990,7 @@
 * **uefi/native:** cache UEFI BinaryReader per buffer and reuse hasDosMzMagic ([0fc591d](https://github.com/shangfabao/rea/commit/0fc591da7c2309f59a46933658de8591a4c90c41))
 * **uefi:** exercise only the framed LZMA worker ([#14072](https://github.com/shangfabao/rea/issues/14072)) ([1f4c8fe](https://github.com/shangfabao/rea/commit/1f4c8fe5d5c810a7aa7d7702c6fc8142b5afd37c))
 * **uefi:** extract UefiScanContext from UefiImageScan ([#13797](https://github.com/shangfabao/rea/issues/13797)) ([913b44d](https://github.com/shangfabao/rea/commit/913b44d1dac95aa09b27dd0fdd91ef7a7524ff75))
+* **uefi:** share view filters, page limits and source indices ([#14680](https://github.com/shangfabao/rea/issues/14680)) ([37083fd](https://github.com/shangfabao/rea/commit/37083fd9e6e12bde1c4bca4c81c9b8f24f82c360))
 * **uefi:** unify LZMA frame readers into LzmaFrameReader with backpressure ([#13814](https://github.com/shangfabao/rea/issues/13814)) ([fc29153](https://github.com/shangfabao/rea/commit/fc29153d5c0aaed05b011ad5461632d485001799))
 * **uninstall:** extract registration-removal and item-collapse helpers from Uninstall ([#14006](https://github.com/shangfabao/rea/issues/14006)) ([bc8a0b3](https://github.com/shangfabao/rea/commit/bc8a0b32f37ef707e71fde55d394087d2b489c71))
 * **uninstall:** extract UninstallDataAndSkills from Uninstall ([#13736](https://github.com/shangfabao/rea/issues/13736)) ([054bbbc](https://github.com/shangfabao/rea/commit/054bbbc55e63ff8d4b617a04cb681145f2ca134f))
@@ -943,6 +1002,7 @@
 * **verifiers:** share the model fixture request reader ([#14520](https://github.com/shangfabao/rea/issues/14520)) ([f5f6bb1](https://github.com/shangfabao/rea/commit/f5f6bb18613bb55e62de4f547114195f1f3d6cac))
 * **verifiers:** share whole-file SHA-256 hashing ([#14475](https://github.com/shangfabao/rea/issues/14475)) ([60af9ef](https://github.com/shangfabao/rea/commit/60af9ef6b35e332dd5645fbb99ededfe5b40c64c))
 * **verify:** exclude negated .ok checks from the abort-reclassification guard ([a80dc68](https://github.com/shangfabao/rea/commit/a80dc68318d2b9e2abca08ae5d4eaf1206b83bde)), refs [#11920](https://github.com/shangfabao/rea/issues/11920)
+* **verify:** share canonical output schema assertions ([#14640](https://github.com/shangfabao/rea/issues/14640)) ([d9b449d](https://github.com/shangfabao/rea/commit/d9b449d39c64789b5c91de4915aba8567817a93b))
 * **verify:** share client receipt publication ([#14317](https://github.com/shangfabao/rea/issues/14317)) ([74996b5](https://github.com/shangfabao/rea/commit/74996b5ba6c58e6d43b991c5167c6a68051e0332))
 * **verify:** share client setup and idempotence checks ([#14326](https://github.com/shangfabao/rea/issues/14326)) ([d7846f2](https://github.com/shangfabao/rea/commit/d7846f283499b450bbbb7bc4301c2e5ef2f58833))
 * **verify:** share Ghidra installation prerequisites ([#14569](https://github.com/shangfabao/rea/issues/14569)) ([a156d20](https://github.com/shangfabao/rea/commit/a156d2051646aaf5d61fe445a96321a45983e769))
@@ -950,12 +1010,14 @@
 * **views:** reuse invalid-view results and row selectors ([#14314](https://github.com/shangfabao/rea/issues/14314)) ([5dafc31](https://github.com/shangfabao/rea/commit/5dafc31d23f8f6f13a57b9b374411f412917d199))
 * **views:** reuse JSON record and request-line projections ([#14582](https://github.com/shangfabao/rea/issues/14582)) ([3d46331](https://github.com/shangfabao/rea/commit/3d4633176f15f3bd8072751af788bf31c7f2e0d8))
 * **views:** share count projections across analysis summaries ([#14600](https://github.com/shangfabao/rea/issues/14600)) ([c8f42a8](https://github.com/shangfabao/rea/commit/c8f42a872d39046a1dd3ae3e431642671b3b9357))
+* **views:** share default page request fields ([#14633](https://github.com/shangfabao/rea/issues/14633)) ([d639828](https://github.com/shangfabao/rea/commit/d63982890e70c55b09704249cde0327537e610f0))
 * **views:** share fixed page budget errors ([#14479](https://github.com/shangfabao/rea/issues/14479)) ([a2fd2d7](https://github.com/shangfabao/rea/commit/a2fd2d7d3045951ee684b6612294495d9c4f7435))
 * **views:** share invalid parent subject errors ([#14505](https://github.com/shangfabao/rea/issues/14505)) ([59a0ed3](https://github.com/shangfabao/rea/commit/59a0ed33fb5dad9b6bcce3e7f318350d88fbc78c))
 * **web:** remove the superseded single-query module matcher ([#14319](https://github.com/shangfabao/rea/issues/14319)) ([ab96130](https://github.com/shangfabao/rea/commit/ab96130f2277fa8a8571fb4bb4f210b6902acd5b))
 * **web:** reuse the shared map list appender ([#14531](https://github.com/shangfabao/rea/issues/14531)) ([8da1e56](https://github.com/shangfabao/rea/commit/8da1e562775eced153123b32cdace52c8030ef19))
 * **windows:** reuse the verified package argument encoder ([#14591](https://github.com/shangfabao/rea/issues/14591)) ([aad3c9c](https://github.com/shangfabao/rea/commit/aad3c9c45aa855e3c33fde4561a6e27f272cd695))
 * **workers:** share bounded JSON line writes ([#14585](https://github.com/shangfabao/rea/issues/14585)) ([1dfd0e5](https://github.com/shangfabao/rea/commit/1dfd0e5fb4774c9f064808533aeb2579fa163e55))
+* **xml:** share direct child element traversal ([#14669](https://github.com/shangfabao/rea/issues/14669)) ([e7cb42a](https://github.com/shangfabao/rea/commit/e7cb42a1d70123a015717f33ca0a0d4d9df24646))
 * **xml:** share DOM element traversal helpers in xmlDocument ([#13799](https://github.com/shangfabao/rea/issues/13799)) ([4b648f2](https://github.com/shangfabao/rea/commit/4b648f23fd061417a7b0b57e560683e907f83020))
 
 
@@ -963,6 +1025,8 @@
 
 * **analysis-view:** qualify javascript-fact-groups readback to scalar values ([1dc1c20](https://github.com/shangfabao/rea/commit/1dc1c20cd614d38a8bfe8ef23d0cea4e391fc561))
 * **artifacts:** explain the per-file verification cost of extraction ([#12745](https://github.com/shangfabao/rea/issues/12745)) ([6878c17](https://github.com/shangfabao/rea/commit/6878c17a833e6a595d4f80e47e98c256d60ca9c0))
+* **browser:** describe comparing retained captures ([b33b8e8](https://github.com/shangfabao/rea/commit/b33b8e8ce6189d5db36f0e1ca90f2ab0a3ea87a6))
+* **browser:** describe paging retained execution observations ([440edb5](https://github.com/shangfabao/rea/commit/440edb5ac050b6b746a8c24cd91bed2ec079fbdd))
 * **ci:** correct default main push coverage ([#14535](https://github.com/shangfabao/rea/issues/14535)) ([1ff864b](https://github.com/shangfabao/rea/commit/1ff864bd21d9df6c6f48c0adde570acac905ca62))
 * **cli:** explain Ghidra annotation lifetime in command help ([f8192bd](https://github.com/shangfabao/rea/commit/f8192bd39d233ccf6e3dd8fd06b1e21082316ddf)), refs [#8242](https://github.com/shangfabao/rea/issues/8242)
 * **cli:** list the desktop_build doctor scope in provider selection ([4bd9327](https://github.com/shangfabao/rea/commit/4bd9327325b75a4632a3a50f0500ae2bfbd00718)), refs [#10251](https://github.com/shangfabao/rea/issues/10251)
@@ -1029,6 +1093,7 @@
 * **apple:** consolidate bundle resource CLI coverage ([#12936](https://github.com/shangfabao/rea/issues/12936)) ([12ac054](https://github.com/shangfabao/rea/commit/12ac0541f68268e6562807e1168ca62d0efd9d7f))
 * **apple:** consolidate dylib resolution contract checks ([#13424](https://github.com/shangfabao/rea/issues/13424)) ([8925ec4](https://github.com/shangfabao/rea/commit/8925ec461e0f36d8109c8226650d5714c6da4bf5))
 * **apple:** expect path-selected inspect_artifact in resource-only sessions ([a4d9a24](https://github.com/shangfabao/rea/commit/a4d9a2412fb2958950e7b0941a3f8777e5bb950d))
+* **apple:** reuse the empty Interface Builder fixture ([#14674](https://github.com/shangfabao/rea/issues/14674)) ([94b1ce3](https://github.com/shangfabao/rea/commit/94b1ce3fe777ff9ac33da19b95ef7e053b669f78))
 * **apple:** share binary plist object layout fixtures ([#14488](https://github.com/shangfabao/rea/issues/14488)) ([6c51be5](https://github.com/shangfabao/rea/commit/6c51be53172fa9cc49a0f337b2e0e1906638b465))
 * **apple:** share the binary plist decoder invariant suite ([#14492](https://github.com/shangfabao/rea/issues/14492)) ([b06d82a](https://github.com/shangfabao/rea/commit/b06d82aa28e3aa7629e4a8f71f177f3a12b3622b))
 * **application:** share late cancellation evidence checks ([#14381](https://github.com/shangfabao/rea/issues/14381)) ([7fe9fc5](https://github.com/shangfabao/rea/commit/7fe9fc5ee9b950c060c536050bd77d51cf80cf25))
@@ -1104,6 +1169,7 @@
 * **ci:** require planner directories in classifier checkouts ([#14553](https://github.com/shangfabao/rea/issues/14553)) ([0acafde](https://github.com/shangfabao/rea/commit/0acafdeafa5880c8e8a385ef0e5b737887a4cecf))
 * **ci:** reuse workflow inventory and verify cache authority ([#13525](https://github.com/shangfabao/rea/issues/13525)) ([eb1d540](https://github.com/shangfabao/rea/commit/eb1d54007576e0443c7200f8da4143ed38025699))
 * **ci:** verify selected shard and provider report refusals ([21051b9](https://github.com/shangfabao/rea/commit/21051b9d06f82d9da0a932d328cae8db87644f77))
+* **cli:** check the Go input budget recovery flag ([#14672](https://github.com/shangfabao/rea/issues/14672)) ([bcaf605](https://github.com/shangfabao/rea/commit/bcaf6056a86b231b774fdada5a8766dcbabbbb2e))
 * **cli:** consolidate Amp launcher registration coverage ([#12940](https://github.com/shangfabao/rea/issues/12940)) ([a31b80a](https://github.com/shangfabao/rea/commit/a31b80a4128502bcffda98d88e764db0a3544dc3))
 * **cli:** consolidate automatic client setup journeys ([#12807](https://github.com/shangfabao/rea/issues/12807)) ([f718e17](https://github.com/shangfabao/rea/commit/f718e17caaa8fa73d6a8705833e811a3be85b994))
 * **cli:** consolidate completed source evidence finalization checks ([688d129](https://github.com/shangfabao/rea/commit/688d129aef5eaf8155d2d1401d86c900effb6f33))
@@ -1120,6 +1186,7 @@
 * **clients:** reuse setup verification for three more clients ([#14460](https://github.com/shangfabao/rea/issues/14460)) ([b5219e7](https://github.com/shangfabao/rea/commit/b5219e7d93e8fb146679afff67dfecccb8493c71))
 * **clients:** share verifier message text search ([#14443](https://github.com/shangfabao/rea/issues/14443)) ([fda73b9](https://github.com/shangfabao/rea/commit/fda73b9f24ba71ad0d0f1fba3db9aa277b594a02))
 * **cli:** reuse the in-process runner for schema and help checks ([#14308](https://github.com/shangfabao/rea/issues/14308)) ([d27eb3a](https://github.com/shangfabao/rea/commit/d27eb3ab240d58e0e1c0bf156113a3660e41afa5))
+* **cli:** share cancellation command argument construction ([#14635](https://github.com/shangfabao/rea/issues/14635)) ([75f6414](https://github.com/shangfabao/rea/commit/75f6414cf90756905271be3e312306f43c336b6c))
 * **cli:** share rendered HTML text extraction ([#14534](https://github.com/shangfabao/rea/issues/14534)) ([e043558](https://github.com/shangfabao/rea/commit/e043558082911f22254a39aa8ff13b79fa0bc570))
 * **cli:** use the registered argument schemas directly ([#14586](https://github.com/shangfabao/rea/issues/14586)) ([5dae66d](https://github.com/shangfabao/rea/commit/5dae66d5638a44ce5151b8d1abbbe1af1f7bca1d))
 * **composition:** consolidate capture redaction fixtures ([#12973](https://github.com/shangfabao/rea/issues/12973)) ([5ca9f48](https://github.com/shangfabao/rea/commit/5ca9f4874b3d9adc9ca753fd97e9a72f7687a350))
@@ -1136,6 +1203,7 @@
 * **config:** consolidate regex runtime budget checks ([#12853](https://github.com/shangfabao/rea/issues/12853)) ([42b36e2](https://github.com/shangfabao/rea/commit/42b36e200b96fb02a9ab22ffd3bbc1b713af6be9))
 * **config:** consolidate Rizin session capacity coverage ([#12780](https://github.com/shangfabao/rea/issues/12780)) ([29049fc](https://github.com/shangfabao/rea/commit/29049fcfd9f34f9c053c8e8cc6ef4e4bb907af79))
 * **config:** remove duplicate Pwntools remediation checks ([#12797](https://github.com/shangfabao/rea/issues/12797)) ([9b17c4a](https://github.com/shangfabao/rea/commit/9b17c4a4a78de06eb6fa8fa2ca6ff39a6880093d))
+* **contracts:** treat declared reference alternatives as Evidence source owners ([e9a79f6](https://github.com/shangfabao/rea/commit/e9a79f67a86259f10c143f5b66072b4b38bccf24))
 * cover Unicode code point ordering ([6d92ca4](https://github.com/shangfabao/rea/commit/6d92ca438fafd72794e5aad31e2a49fbfc70eb7a))
 * **cutter:** consolidate authenticated response frame coverage ([#12931](https://github.com/shangfabao/rea/issues/12931)) ([1bc85bc](https://github.com/shangfabao/rea/commit/1bc85bc215231460d389076ad6cf51e1e6c199a6))
 * **cutter:** isolate verifier platform checks ([#12939](https://github.com/shangfabao/rea/issues/12939)) ([50d6f37](https://github.com/shangfabao/rea/commit/50d6f37393ee74ede18aa6d68b884a914653a2a4))
@@ -1163,6 +1231,7 @@
 * **dotnet:** consolidate managed ExtraData coverage ([#12788](https://github.com/shangfabao/rea/issues/12788)) ([e8105d6](https://github.com/shangfabao/rea/commit/e8105d6be9c5b96a0635f09e0eeef9672f112e8f))
 * **dotnet:** consolidate managed PE and field constant contracts ([#13365](https://github.com/shangfabao/rea/issues/13365)) ([da6f898](https://github.com/shangfabao/rea/commit/da6f89808dcc9c6f528660426a54cff721cfbf03))
 * **dotnet:** prove scoped member ownership within the caller budget ([#13369](https://github.com/shangfabao/rea/issues/13369)) ([2e8bdfd](https://github.com/shangfabao/rea/commit/2e8bdfd808b3de68cbd283b3f4f5510ee728a288))
+* **dotnet:** stop expecting required_value for the lower-bound path-depth refusal ([d21ba43](https://github.com/shangfabao/rea/commit/d21ba43581cd64531cd43a56b691141b02918e63))
 * **dotnet:** use smaller fixtures for managed byte budgets ([#12793](https://github.com/shangfabao/rea/issues/12793)) ([337fd43](https://github.com/shangfabao/rea/commit/337fd43a0f91aa63c9697fd5dc912f7807454ba3))
 * drop detail requests the budget seed made redundant ([#14615](https://github.com/shangfabao/rea/issues/14615)) ([88fd8a9](https://github.com/shangfabao/rea/commit/88fd8a9df083568a7cb4a65012f1b9813c5b82b1))
 * **electron:** consolidate action and projection coverage ([#12959](https://github.com/shangfabao/rea/issues/12959)) ([32e5f5b](https://github.com/shangfabao/rea/commit/32e5f5bc1c26281656d6d2a17e14308c8eba05ce))
@@ -1317,6 +1386,7 @@
 * **json:** verify structured CLI file diagnostics ([#13051](https://github.com/shangfabao/rea/issues/13051)) ([243b9a3](https://github.com/shangfabao/rea/commit/243b9a37f678d27169786cab2f74861958400261))
 * **kuna:** exercise contradictory rows and coordinate shared cancellation ([#12802](https://github.com/shangfabao/rea/issues/12802)) ([766fb9e](https://github.com/shangfabao/rea/commit/766fb9e78e4b1f169f210239aef1c5fdbe535988))
 * **ledger:** share the packaged process manifest fixture ([#14526](https://github.com/shangfabao/rea/issues/14526)) ([cb477ff](https://github.com/shangfabao/rea/commit/cb477ff0e7d1eccdfecbdf1faceee3a46c09eb84))
+* **limits:** assert structured apktool and Go limit fields ([#14667](https://github.com/shangfabao/rea/issues/14667)) ([6f39bae](https://github.com/shangfabao/rea/commit/6f39bae043a5cc78902cfd58d6e5cd140bac9c28))
 * **lint:** share Vitest rule tester setup ([#14552](https://github.com/shangfabao/rea/issues/14552)) ([1db5c70](https://github.com/shangfabao/rea/commit/1db5c707523e225c5327ddbc6f5e75333fa86e5b))
 * **lldb:** consolidate bridge journal and FIFO checks ([#12808](https://github.com/shangfabao/rea/issues/12808)) ([7f5a39c](https://github.com/shangfabao/rea/commit/7f5a39c0c10c49e637cdf13b9dd8fabd7fe296b7))
 * **macho:** consolidate classic and modern dylib encoding proofs ([#13952](https://github.com/shangfabao/rea/issues/13952)) ([d9ba8db](https://github.com/shangfabao/rea/commit/d9ba8db6e1ea4f96c9a7d400d3d9f8c1d6d9874e))
@@ -1360,6 +1430,7 @@
 * **mcp:** share address context capacity setup ([#14542](https://github.com/shangfabao/rea/issues/14542)) ([d11eba6](https://github.com/shangfabao/rea/commit/d11eba6295c764b10a72341d9fa29178bf7b2b7f))
 * **mcp:** share caller-owned in-memory handshakes ([#14424](https://github.com/shangfabao/rea/issues/14424)) ([efeac85](https://github.com/shangfabao/rea/commit/efeac85e0f2338b91d35c32ae2a67b75d96604ea))
 * **mcp:** share isolated file inspection sessions ([#14426](https://github.com/shangfabao/rea/issues/14426)) ([d0c51d1](https://github.com/shangfabao/rea/commit/d0c51d1fa063c09d345a279b732d6b7c32623baa))
+* **mcp:** share the listed-tool evidence caller ([#14676](https://github.com/shangfabao/rea/issues/14676)) ([20428db](https://github.com/shangfabao/rea/commit/20428dbc397eac27925278316a1ee9e70a122716))
 * **mcp:** share the successful tool assertion ([#14576](https://github.com/shangfabao/rea/issues/14576)) ([3bb225c](https://github.com/shangfabao/rea/commit/3bb225c564249330b6286187bffaccd12f5b1f10))
 * **mcp:** strengthen portable pattern witnesses ([#13324](https://github.com/shangfabao/rea/issues/13324)) ([d08c523](https://github.com/shangfabao/rea/commit/d08c52384ac1e7dde8a5c1f0a4a320a83f082268))
 * **mitmproxy:** consolidate transport evidence checks ([#12935](https://github.com/shangfabao/rea/issues/12935)) ([f61c38c](https://github.com/shangfabao/rea/commit/f61c38c8208f33c2b0a7fd906b89d505cfd5a917))
@@ -1503,6 +1574,7 @@
 * **sqlite:** consolidate inventory column capacity checks ([#12798](https://github.com/shangfabao/rea/issues/12798)) ([d21636a](https://github.com/shangfabao/rea/commit/d21636ae071d6cd9223150a72e6a59d930ce9673))
 * **sqlite:** consolidate inventory column capacity coverage ([d21636a](https://github.com/shangfabao/rea/commit/d21636ae071d6cd9223150a72e6a59d930ce9673))
 * **sqlite:** consolidate retained views and journal coverage ([#12876](https://github.com/shangfabao/rea/issues/12876)) ([b38438b](https://github.com/shangfabao/rea/commit/b38438bab4ecac3b85bb7808e8af53a138c10d52))
+* **trace:** assert adjustable nesting budget refusals ([#14647](https://github.com/shangfabao/rea/issues/14647)) ([7768770](https://github.com/shangfabao/rea/commit/77687702b3d0e375e8698128a5b4746022e8e4f6))
 * **uefi:** consolidate extraction publication contracts ([#13627](https://github.com/shangfabao/rea/issues/13627)) ([9e0d132](https://github.com/shangfabao/rea/commit/9e0d132ef3c16649333a9dfd8c43f5ddd335fa80))
 * **uefi:** consolidate volume ownership and checksum proofs ([#14070](https://github.com/shangfabao/rea/issues/14070)) ([df7f8b9](https://github.com/shangfabao/rea/commit/df7f8b9ead0dd472cd74803ea1bb90a62865fd4b))
 * **uefi:** reuse the driver file across firmware fixtures ([#14570](https://github.com/shangfabao/rea/issues/14570)) ([e6a4965](https://github.com/shangfabao/rea/commit/e6a4965084b713d663c14e7e48cce8a30c3f5ec5))
